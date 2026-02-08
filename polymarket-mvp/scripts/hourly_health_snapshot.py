@@ -2,6 +2,7 @@
 import json
 import subprocess
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,7 +33,11 @@ btc_target_missing_markets_1h = set()
 now = time.time()
 
 if EVENTS.exists():
-    for line in EVENTS.read_text().splitlines():
+    with EVENTS.open() as f:
+        # Keep this lightweight for hourly cron runs even when events.jsonl grows large.
+        # We only need recent state, so tail the last ~5k events.
+        recent_lines = deque(f, maxlen=5000)
+    for line in recent_lines:
         try:
             e = json.loads(line)
         except Exception:
