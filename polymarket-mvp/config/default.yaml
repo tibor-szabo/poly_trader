@@ -48,6 +48,13 @@ paper:
   starting_cash_usd: 1000
   simulated_latency_ms: 300
 
+strategy:
+  trade_cap_usd: 100
+  max_open_positions: 2
+  base_reentry_cooldown_s: 120
+  flip_reentry_cooldown_s: 240
+  min_hold_for_flip_exit_s: 20
+
 storage:
   state_path: "data/state.json"
   events_path: "data/events.jsonl"

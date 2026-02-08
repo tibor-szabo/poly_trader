@@ -1,6 +1,7 @@
 import argparse
 import re
 import math
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -37,6 +38,9 @@ _MODEL_STATS = {
     "BK": {"trades": 0, "wins": 0, "pnl": 0.0},
 }
 _LAST_CLOSE_TS = {}
+_LAST_CLOSE_REASON = {}
+_EDGE_HIST = {}
+_WINNER_HIST = {}
 
 
 def _ensure_ws_hook() -> ClobWsHook:
@@ -52,6 +56,15 @@ def _parse_dt(s: str):
         return datetime.fromisoformat((s or "").replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _seconds_since_iso(s: str) -> float:
+    dt = _parse_dt(s)
+    if not dt:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
 
 
 def _is_btc_ref(r) -> bool:
@@ -202,6 +215,41 @@ def _model_weight(name: str) -> float:
     return max(0.7, min(1.3, 0.8 + 0.4 * winrate + pnl_adj))
 
 
+def _mc_target_probs(current: float, target: float, t_left_s: float, drift_per_s: float, sigma_per_s: float, paths: int = 800) -> tuple[float, float]:
+    if current <= 0 or target <= 0:
+        return 0.5, 0.5
+    dt = 1.0
+    n = max(1, int(min(900, t_left_s)))
+    hit = 0
+    close_above = 0
+    mu = float(drift_per_s)
+    sig = max(1e-8, float(sigma_per_s))
+    sq = math.sqrt(dt)
+    for _ in range(paths):
+        p = current
+        touched = False
+        for _i in range(n):
+            z = random.gauss(0.0, 1.0)
+            p = p * math.exp((mu - 0.5 * sig * sig) * dt + sig * sq * z)
+            if (p >= target):
+                touched = True
+        if touched:
+            hit += 1
+        if p >= target:
+            close_above += 1
+    return close_above / paths, hit / paths
+
+
+def _history_push(hist: dict, key: str, val, maxlen: int = 12):
+    arr = hist.get(key)
+    if arr is None:
+        arr = []
+        hist[key] = arr
+    arr.append(val)
+    if len(arr) > maxlen:
+        del arr[: len(arr) - maxlen]
+
+
 def _model_compare(row: dict, signal: dict) -> dict:
     p_ta = max(0.02, min(0.98, float(signal.get("p_up", 0.5))))
     p_ll = max(0.02, min(0.98, 0.5 + 0.18 * max(-1.5, min(1.5, float(signal.get("lead_bps", 0.0)) / 35.0))))
@@ -227,6 +275,11 @@ def _model_compare(row: dict, signal: dict) -> dict:
     else:
         p_anchor = 0.5
 
+    # Monte-Carlo short-horizon probabilities.
+    drift_per_s = float(signal.get("rf", 0.0)) / 20.0
+    sigma_per_s = max(1e-6, float(signal.get("sigma", 0.00012)))
+    p_close_mc, p_hit_mc = _mc_target_probs(current, target, t_left, drift_per_s, sigma_per_s, paths=700)
+
     ay = float(row.get("best_ask_yes") or 0.0)
     an = float(row.get("best_ask_no") or 0.0)
     by = float(row.get("best_bid_yes") or 0.0)
@@ -241,11 +294,20 @@ def _model_compare(row: dict, signal: dict) -> dict:
     bk = _bids_from_p(row, p_bk, 0.006)
 
     models = {"TA": ta, "LL": ll, "RG": rg, "BK": bk}
-    probs = {"TA": p_ta, "LL": p_ll, "RG": p_rg, "BK": p_bk, "ANCHOR": p_anchor}
+    probs = {
+        "TA": p_ta,
+        "LL": p_ll,
+        "RG": p_rg,
+        "BK": p_bk,
+        "ANCHOR": p_anchor,
+        "MC_CLOSE": p_close_mc,
+    }
     weights = {k: _model_weight(k) for k in ["TA", "LL", "RG", "BK"]}
-    # Anchor gets dynamic weight: stronger near expiry, softer when far out.
-    w_anchor = max(0.6, min(2.0, 1.6 - min(t_left, 900.0) / 900.0))
+    # Anchor/MC get stronger near expiry.
+    w_anchor = max(0.7, min(2.2, 1.9 - min(t_left, 900.0) / 900.0))
+    w_mc = max(0.8, min(2.4, 2.0 - min(t_left, 900.0) / 900.0))
     weights["ANCHOR"] = w_anchor
+    weights["MC_CLOSE"] = w_mc
     wsum = sum(weights.values()) or 1.0
     p_yes_ens = sum(probs[k] * weights[k] for k in probs.keys()) / wsum
 
@@ -256,7 +318,7 @@ def _model_compare(row: dict, signal: dict) -> dict:
         wgt = weights.get(name, 1.0)
         scored.append((strength * wgt, name, direction, strength))
     if not scored:
-        return {"models": models, "probs": probs, "p_yes_ens": p_yes_ens, "best": "-", "side": None, "confidence": 0, "weights": {k: round(v, 3) for k, v in weights.items()}}
+        return {"models": models, "probs": probs, "p_yes_ens": p_yes_ens, "p_hit_target": p_hit_mc, "best": "-", "side": None, "confidence": 0, "weights": {k: round(v, 3) for k, v in weights.items()}}
     scored.sort(reverse=True)
     _, best_name, side, base_strength = scored[0]
     agree = sum(1 for _, _, d, _ in scored if d == side) / len(scored)
@@ -266,6 +328,7 @@ def _model_compare(row: dict, signal: dict) -> dict:
         "models": models,
         "probs": probs,
         "p_yes_ens": p_yes_ens,
+        "p_hit_target": p_hit_mc,
         "best": best_name,
         "side": side,
         "confidence": confidence,
@@ -703,6 +766,7 @@ def run_once(cfg: dict):
         p_yes = float(cmp.get("p_yes_ens", 0.5))
         probs = cmp.get("probs") or {}
         r["p_yes_model"] = round(p_yes, 4)
+        r["p_hit_target"] = round(float(cmp.get("p_hit_target", 0.5)), 4)
         r["p_anchor"] = round(float(probs.get("ANCHOR", 0.5)), 4)
         if r.get("end_ts"):
             r["t_left_s"] = max(0, int(float(r.get("end_ts")) - datetime.now(timezone.utc).timestamp()))
@@ -841,8 +905,12 @@ def run_once(cfg: dict):
         )
 
     # Model-driven BTC paper trading simulation.
-    trade_cap = 100.0
-    max_open_positions = 2
+    strategy_cfg = cfg.get("strategy", {})
+    trade_cap = float(strategy_cfg.get("trade_cap_usd", 100.0))
+    max_open_positions = int(strategy_cfg.get("max_open_positions", 2))
+    base_reentry_cooldown_s = float(strategy_cfg.get("base_reentry_cooldown_s", 120.0))
+    flip_reentry_cooldown_s = float(strategy_cfg.get("flip_reentry_cooldown_s", 240.0))
+    min_hold_for_flip_exit_s = float(strategy_cfg.get("min_hold_for_flip_exit_s", 20.0))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
 
     for r in btc_rows:
@@ -872,7 +940,15 @@ def run_once(cfg: dict):
         dist_bps = ((btc_now - btc_target) / btc_target * 10000.0) if btc_target > 0 else 0.0
         # Reversal belief from ensemble probability.
         p_yes = float(r.get("p_yes_model") or 0.5)
-        reversal_belief = (winner_side == "BUY_YES" and p_yes < 0.42) or (winner_side == "BUY_NO" and p_yes > 0.58)
+        p_hit = float(r.get("p_hit_target") or 0.5)
+        _history_push(_EDGE_HIST, mid, {"ey": edge_yes, "en": edge_no})
+        _history_push(_WINNER_HIST, mid, winner_side)
+
+        wh = _WINNER_HIST.get(mid, [])
+        winner_stability = (sum(1 for x in wh if x == winner_side) / len(wh)) if wh else 0.0
+
+        # Reversal only when model disagrees, target hit chance is weak, and winner is unstable.
+        reversal_belief = ((winner_side == "BUY_YES" and p_yes < 0.42) or (winner_side == "BUY_NO" and p_yes > 0.58)) and (p_hit < 0.45) and (winner_stability < 0.65)
 
         append_event(cfg["storage"]["events_path"], {
             "type": "strategy_snapshot",
@@ -881,6 +957,8 @@ def run_once(cfg: dict):
             "winner_side": winner_side,
             "distance_bps": round(dist_bps, 2),
             "reversal_belief": bool(reversal_belief),
+            "winner_stability": round(winner_stability, 3),
+            "p_hit_target": round(p_hit, 4),
             "confidence": conf,
             "consensus": consensus,
             "best_model": best_model,
@@ -889,20 +967,33 @@ def run_once(cfg: dict):
             "open_positions": len(open_map),
         })
 
-        # Open rule v2: follow currently winning direction by default;
-        # only fade when strong reversal belief + stronger edge.
-        cool_ok = (datetime.now(timezone.utc).timestamp() - float(_LAST_CLOSE_TS.get(mid, 0.0))) > 120
+        # Open rule v3: trend-follow by default with persistence filter; reversal is rare.
+        last_close_ts = float(_LAST_CLOSE_TS.get(mid, 0.0))
+        last_close_reason = str(_LAST_CLOSE_REASON.get(mid, "") or "")
+        reentry_cooldown_s = flip_reentry_cooldown_s if last_close_reason in {"edge_flip_wrong_way", "edge_decay_stop", "flip_stop"} else base_reentry_cooldown_s
+        cool_ok = (datetime.now(timezone.utc).timestamp() - last_close_ts) > reentry_cooldown_s
         open_side = winner_side
-        required_edge = 0.02
+        required_edge = 0.025 if winner_side == "BUY_YES" else 0.04
+        if p_hit > 0.65 and winner_stability >= 0.7:
+            required_edge *= 0.85
         if reversal_belief:
             open_side = "BUY_NO" if winner_side == "BUY_YES" else "BUY_YES"
-            required_edge = 0.05
+            required_edge = 0.06
+
+        eh = _EDGE_HIST.get(mid, [])
+        last = eh[-5:]
+        if open_side == "BUY_YES":
+            persist = sum(1 for x in last if float(x.get("ey", 0.0)) > 0)
+        else:
+            persist = sum(1 for x in last if float(x.get("en", 0.0)) > 0)
 
         side_edge = edge_yes if open_side == "BUY_YES" else edge_no
-        if open_pos is None and conf >= 45 and consensus >= 3 and side_edge >= required_edge and len(open_map) < max_open_positions and cool_ok:
+        if open_pos is None and conf >= 45 and consensus >= 3 and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok:
             side = open_side
             entry = ask_yes if side == "BUY_YES" else ask_no
-            size_usd = min(trade_cap, float(state.cash_usd))
+            # Confidence-weighted sizing.
+            size_mul = max(0.5, min(1.0, 0.5 + (conf / 100.0) * 0.6))
+            size_usd = min(trade_cap * size_mul, float(state.cash_usd))
             if entry > 0 and size_usd >= 1.0:
                 pos = open_position(
                     state,
@@ -914,6 +1005,7 @@ def run_once(cfg: dict):
                     model=best_model,
                 )
                 pos.edge_entry = float(edge_yes if side == "BUY_YES" else edge_no)
+                pos.edge_peak = pos.edge_entry
                 open_map[mid] = pos
                 append_event(cfg["storage"]["events_path"], {
                     "type": "paper_trade",
@@ -927,6 +1019,9 @@ def run_once(cfg: dict):
                     "model": best_model,
                     "confidence": conf,
                     "consensus": consensus,
+                    "winner_side": winner_side,
+                    "winner_stability": round(winner_stability, 3),
+                    "p_hit_target": round(p_hit, 4),
                     "edge_yes": round(edge_yes, 4),
                     "edge_no": round(edge_no, 4),
                 })
@@ -953,8 +1048,13 @@ def run_once(cfg: dict):
             flip = (side != open_pos.side) and conf >= 55
             against_winner = (open_pos.side != winner_side)
 
+            peak = float(open_pos.edge_peak if open_pos.edge_peak is not None else (open_pos.edge_entry or held_edge or 0.0))
+            peak = max(peak, held_edge)
+            open_pos.edge_peak = peak
+
             close_reason = None
             close_frac = 0.0
+            held_s = _seconds_since_iso(open_pos.opened_at)
 
             # Resolve proxy
             if exit_price >= 0.99:
@@ -966,11 +1066,13 @@ def run_once(cfg: dict):
                 close_reason, close_frac = "hard_stop_25", 1.0
             elif u_pnl <= -0.15 and flip:
                 close_reason, close_frac = "flip_stop", 1.0
-            # mispricing goes wrong-way: cut/flip risk
-            elif held_edge <= -0.01 and opp_edge >= 0.02:
+            # mispricing goes wrong-way: cut/flip risk (after brief hold to reduce churn)
+            elif held_s >= min_hold_for_flip_exit_s and held_edge <= -0.01 and opp_edge >= 0.02:
                 close_reason, close_frac = "edge_flip_wrong_way", 1.0
-            elif held_edge < 0.0 and u_pnl < 0:
+            elif held_s >= min_hold_for_flip_exit_s and held_edge < 0.0 and u_pnl < 0:
                 close_reason, close_frac = "edge_decay_stop", 1.0
+            elif held_s >= min_hold_for_flip_exit_s and peak > 0 and held_edge < (0.45 * peak) and u_pnl > 0:
+                close_reason, close_frac = "edge_trailing_stop", 1.0
             # if we're fighting current winner and no real reversal thesis, cut.
             elif against_winner and (not reversal_belief) and t_left_s < 300:
                 close_reason, close_frac = "against_winner_no_reversal", 1.0
@@ -994,6 +1096,7 @@ def run_once(cfg: dict):
                 if close_frac >= 1.0:
                     pnl = close_position(state, open_pos, exit_price)
                     _LAST_CLOSE_TS[mid] = datetime.now(timezone.utc).timestamp()
+                    _LAST_CLOSE_REASON[mid] = close_reason
                 else:
                     pnl = close_fraction(state, open_pos, exit_price, close_frac)
                     open_pos.pnl_usd = float((open_pos.pnl_usd or 0.0) + pnl)
