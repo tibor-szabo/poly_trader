@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
 import subprocess
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,16 +15,43 @@ def ps_count(pattern: str) -> int:
     return int(out or 0)
 
 
+def to_epoch(ts):
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
+    return None
+
+
 last = {}
+btc_target_missing_1h = 0
+now = time.time()
+
 if EVENTS.exists():
     for line in EVENTS.read_text().splitlines():
         try:
             e = json.loads(line)
         except Exception:
             continue
+
         t = e.get("type")
-        if t in {"market_scan", "inefficiency_report", "weather_scan", "ws_usage", "market_groups"}:
+        if t in {
+            "market_scan",
+            "inefficiency_report",
+            "weather_scan",
+            "ws_usage",
+            "market_groups",
+            "strategy_snapshot",
+        }:
             last[t] = e
+
+        if t == "btc_target_missing":
+            ts = to_epoch(e.get("ts"))
+            if ts and now - ts <= 3600:
+                btc_target_missing_1h += 1
 
 loop_n = ps_count(r"polymarket_mvp\.loop")
 dash_n = ps_count(r"polymarket_mvp\.dashboard")
@@ -31,7 +60,11 @@ print(f"loops={loop_n} dashboards={dash_n}")
 
 ms = last.get("market_scan", {})
 if ms:
-    c = (ms.get("top_candidates") or [{}])[0]
+    cands = ms.get("top_candidates") or []
+    c = next(
+        (x for x in cands if (x.get("signal") or "").upper() not in {"NO_OPPORTUNITY", "NO_TRADE"}),
+        cands[0] if cands else {},
+    )
     print(
         "market_scan",
         ms.get("ts"),
@@ -79,3 +112,15 @@ if grp:
             f"model={btc.get('best_model')}",
             f"consensus={btc.get('model_consensus')}",
         )
+
+snap = last.get("strategy_snapshot", {})
+if snap:
+    print(
+        "strategy",
+        snap.get("ts"),
+        snap.get("market_id"),
+        snap.get("winner_side"),
+        f"open_positions={snap.get('open_positions')}",
+    )
+
+print(f"btc_target_missing_1h={btc_target_missing_1h}")
