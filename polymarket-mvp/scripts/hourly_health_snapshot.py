@@ -42,8 +42,9 @@ now = time.time()
 if EVENTS.exists():
     with EVENTS.open() as f:
         # Keep this lightweight for hourly cron runs even when events.jsonl grows large.
-        # We only need recent state, so tail the last ~5k events.
-        recent_lines = deque(f, maxlen=5000)
+        # Tail a much larger window so high-frequency periods do not undercount
+        # within-hour diagnostics (e.g., btc_target_missing bursts).
+        recent_lines = deque(f, maxlen=100000)
     for line in recent_lines:
         try:
             e = json.loads(line)

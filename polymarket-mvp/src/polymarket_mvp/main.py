@@ -1131,7 +1131,7 @@ def run_once(cfg: dict):
             elif str(open_pos.model or "").startswith("SCALP:") and held_edge < 0.004:
                 close_reason, close_frac = "scalp_edge_faded", 1.0
             # mispricing goes wrong-way: cut/flip risk (after brief hold to reduce churn)
-            elif held_s >= min_hold_for_flip_exit_s and held_edge <= -0.01 and opp_edge >= 0.02:
+            elif held_s >= min_hold_for_flip_exit_s and held_edge <= -0.012 and opp_edge >= 0.025:
                 close_reason, close_frac = "edge_flip_wrong_way", 1.0
             elif held_s >= min_hold_for_flip_exit_s and held_edge < 0.0 and u_pnl < 0:
                 close_reason, close_frac = "edge_decay_stop", 1.0
