@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime artifacts
+/tmp/
+tmp_*.log
+data/events.jsonl
+data/state.json
+
+# macOS
+.DS_Store

@@ -1,0 +1,53 @@
+app:
+  mode: paper
+  loop_seconds: 1
+  event_driven: true
+  min_cycle_seconds: 0.2
+
+data:
+  clob_rest_base: "https://clob.polymarket.com"
+  gamma_base: "https://gamma-api.polymarket.com"
+  use_clob_ws: true
+  stale_seconds: 30
+  max_markets: 30
+  btc_group_size: 12
+  alt_group_size: 10
+  alt_group_refresh_seconds: 300
+  alt_group_horizon_days: 30
+  alt_group_topic_cap: 3
+  alt_vol_window_seconds: 600
+  alt_min_updates_per_min: 3
+  alt_vol_weight: 0.60
+  alt_max_spread_sum: 0.12
+  btc_live_poll_ms: 300
+  focus_keywords:
+    - "BTC"
+    - "Bitcoin"
+    - "15 min"
+    - "15-minute"
+    - "Up or Down"
+  focus_slugs: []
+  focus_slug_prefixes:
+    - "btc-updown-15m-"
+
+scoring:
+  min_edge_bps: 20
+  slippage_bps: 25
+  fee_bps: 10
+  target_size_usd: 20
+
+execution:
+  max_exec_sum: 1.02
+
+risk:
+  max_notional_per_market_usd: 100
+  max_daily_loss_usd: 50
+  max_open_markets: 5
+
+paper:
+  starting_cash_usd: 1000
+  simulated_latency_ms: 300
+
+storage:
+  state_path: "data/state.json"
+  events_path: "data/events.jsonl"
