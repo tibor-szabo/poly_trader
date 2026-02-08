@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+import json
+import time
+from collections import Counter, defaultdict
+from datetime import datetime
+from pathlib import Path
+
+EVENTS = Path(__file__).resolve().parents[1] / "data" / "events.jsonl"
+WINDOW_S = 3600
+
+
+def to_epoch(v):
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
+    return None
+
+
+def main():
+    now = time.time()
+    cut = now - WINDOW_S
+    opens, closes, guards = [], [], []
+
+    with EVENTS.open() as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except Exception:
+                continue
+            t = to_epoch(e.get("ts"))
+            if not t or t < cut:
+                continue
+            typ = e.get("type")
+            if typ == "paper_trade":
+                if e.get("action") == "OPEN":
+                    opens.append(e)
+                elif "CLOSE" in str(e.get("action") or ""):
+                    closes.append(e)
+            elif typ == "market_guardrail":
+                guards.append(e)
+
+    pnl = sum(float(e.get("pnl_usd") or 0.0) for e in closes)
+    wins = sum(1 for e in closes if float(e.get("pnl_usd") or 0.0) > 0)
+    losses = sum(1 for e in closes if float(e.get("pnl_usd") or 0.0) <= 0)
+    winrate = (wins / len(closes) * 100.0) if closes else 0.0
+
+    by_side = Counter((e.get("side") or "-") for e in closes)
+    by_model = Counter((e.get("model_open") or e.get("model") or "-") for e in closes)
+    close_reasons = Counter((e.get("reason") or "-") for e in closes)
+
+    # Re-entry / churn: open after close on same market within 10 minutes.
+    closes_by_market = defaultdict(list)
+    for e in closes:
+        ts = to_epoch(e.get("closed_at") or e.get("ts"))
+        if ts:
+            closes_by_market[str(e.get("market_id") or "")].append(ts)
+    for v in closes_by_market.values():
+        v.sort()
+
+    reentries = 0
+    fast_reentries = 0
+    hold_s = []
+    for e in opens:
+        mid = str(e.get("market_id") or "")
+        ot = to_epoch(e.get("opened_at") or e.get("ts"))
+        if not mid or not ot:
+            continue
+        prev = [x for x in closes_by_market.get(mid, []) if x < ot]
+        if prev:
+            dt = ot - prev[-1]
+            if dt <= 600:
+                reentries += 1
+            if dt <= 180:
+                fast_reentries += 1
+
+    for e in closes:
+        ot = to_epoch(e.get("opened_at"))
+        ct = to_epoch(e.get("closed_at") or e.get("ts"))
+        if ot and ct and ct >= ot:
+            hold_s.append(ct - ot)
+
+    avg_hold = (sum(hold_s) / len(hold_s)) if hold_s else 0.0
+
+    out = {
+        "window_minutes": 60,
+        "counts": {"opens": len(opens), "closes": len(closes)},
+        "pnl_usd": round(pnl, 4),
+        "winrate_pct": round(winrate, 2),
+        "wins": wins,
+        "losses": losses,
+        "by_side": dict(by_side),
+        "by_model": dict(by_model),
+        "close_reasons": dict(close_reasons),
+        "churn": {
+            "reentries_10m": reentries,
+            "fast_reentries_3m": fast_reentries,
+            "avg_hold_seconds": round(avg_hold, 2),
+        },
+        "guardrails_triggered": len(guards),
+    }
+    print(json.dumps(out, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

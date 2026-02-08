@@ -41,6 +41,8 @@ _LAST_CLOSE_TS = {}
 _LAST_CLOSE_REASON = {}
 _EDGE_HIST = {}
 _WINNER_HIST = {}
+_FLIP_FAIL_STREAK = {}
+_MARKET_LOCK_UNTIL = {}
 
 
 def _ensure_ws_hook() -> ClobWsHook:
@@ -140,6 +142,42 @@ def _price_near_ts(ts: float, max_delta_s: float = 120.0) -> Optional[float]:
     if best is None or best_dt > max_delta_s:
         return None
     return best
+
+
+def _binance_impulse_signal() -> dict:
+    # Detect very short-term Binance impulse for scalp entries.
+    if len(_BTC_SIGNAL_HISTORY) < 8:
+        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0}
+    now = _BTC_SIGNAL_HISTORY[-1]
+    bi_now = now.get("bi")
+    if bi_now is None or float(bi_now) <= 0:
+        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0}
+
+    t_now = float(now.get("t", 0.0))
+    p3 = None
+    p8 = None
+    for x in reversed(_BTC_SIGNAL_HISTORY):
+        dt = t_now - float(x.get("t", 0.0))
+        bi = x.get("bi")
+        if bi is None:
+            continue
+        if p3 is None and dt >= 3.0:
+            p3 = float(bi)
+        if p8 is None and dt >= 8.0:
+            p8 = float(bi)
+            break
+    if p3 is None or p8 is None or p3 <= 0 or p8 <= 0:
+        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0}
+
+    bps_3s = ((float(bi_now) - p3) / p3) * 10000.0
+    bps_8s = ((float(bi_now) - p8) / p8) * 10000.0
+
+    side = None
+    if bps_3s >= 7.0 and bps_8s >= 10.0:
+        side = "BUY_YES"
+    elif bps_3s <= -7.0 and bps_8s <= -10.0:
+        side = "BUY_NO"
+    return {"side": side, "bps_3s": bps_3s, "bps_8s": bps_8s}
 
 
 def _compute_btc_signal() -> dict:
@@ -912,6 +950,7 @@ def run_once(cfg: dict):
     flip_reentry_cooldown_s = float(strategy_cfg.get("flip_reentry_cooldown_s", 240.0))
     min_hold_for_flip_exit_s = float(strategy_cfg.get("min_hold_for_flip_exit_s", 20.0))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
+    impulse = _binance_impulse_signal()
 
     for r in btc_rows:
         # Trade only markets with known target BTC.
@@ -965,13 +1004,18 @@ def run_once(cfg: dict):
             "edge_yes": edge_yes,
             "edge_no": edge_no,
             "open_positions": len(open_map),
+            "flip_fail_streak": int(_FLIP_FAIL_STREAK.get(mid, 0) or 0),
+            "market_locked": bool(datetime.now(timezone.utc).timestamp() < float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)),
         })
 
         # Open rule v3: trend-follow by default with persistence filter; reversal is rare.
+        now_epoch = datetime.now(timezone.utc).timestamp()
         last_close_ts = float(_LAST_CLOSE_TS.get(mid, 0.0))
         last_close_reason = str(_LAST_CLOSE_REASON.get(mid, "") or "")
         reentry_cooldown_s = flip_reentry_cooldown_s if last_close_reason in {"edge_flip_wrong_way", "edge_decay_stop", "flip_stop"} else base_reentry_cooldown_s
-        cool_ok = (datetime.now(timezone.utc).timestamp() - last_close_ts) > reentry_cooldown_s
+        lock_until = float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)
+        lock_ok = now_epoch >= lock_until
+        cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok
         open_side = winner_side
         required_edge = 0.025 if winner_side == "BUY_YES" else 0.04
         if p_hit > 0.65 and winner_stability >= 0.7:
@@ -988,12 +1032,24 @@ def run_once(cfg: dict):
             persist = sum(1 for x in last if float(x.get("en", 0.0)) > 0)
 
         side_edge = edge_yes if open_side == "BUY_YES" else edge_no
-        if open_pos is None and conf >= 45 and consensus >= 3 and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok:
-            side = open_side
+
+        normal_open_ok = open_pos is None and conf >= 45 and consensus >= 3 and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok
+
+        # Fast Binance impulse scalp: take movement direction, then exit quickly when edge decays.
+        impulse_side = impulse.get("side")
+        impulse_bps = float(impulse.get("bps_3s") or 0.0)
+        impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 7.0 and impulse_edge >= 0.012 and len(open_map) < max_open_positions and cool_ok
+
+        if normal_open_ok or scalp_open_ok:
+            side = impulse_side if scalp_open_ok else open_side
             entry = ask_yes if side == "BUY_YES" else ask_no
-            # Confidence-weighted sizing.
+            # Confidence-weighted sizing; smaller size for scalp entries.
             size_mul = max(0.5, min(1.0, 0.5 + (conf / 100.0) * 0.6))
+            if scalp_open_ok:
+                size_mul = min(size_mul, 0.65)
             size_usd = min(trade_cap * size_mul, float(state.cash_usd))
+            model_tag = (f"SCALP:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
             if entry > 0 and size_usd >= 1.0:
                 pos = open_position(
                     state,
@@ -1002,7 +1058,7 @@ def run_once(cfg: dict):
                     side=side,
                     entry_price=entry,
                     size_usd=size_usd,
-                    model=best_model,
+                    model=model_tag,
                 )
                 pos.edge_entry = float(edge_yes if side == "BUY_YES" else edge_no)
                 pos.edge_peak = pos.edge_entry
@@ -1016,16 +1072,17 @@ def run_once(cfg: dict):
                     "size_usd": round(pos.size_usd, 2),
                     "entry_price": round(pos.entry_price, 4),
                     "opened_at": pos.opened_at,
-                    "model": best_model,
+                    "model": model_tag,
                     "confidence": conf,
                     "consensus": consensus,
                     "winner_side": winner_side,
                     "winner_stability": round(winner_stability, 3),
                     "p_hit_target": round(p_hit, 4),
+                    "impulse_bps_3s": round(impulse_bps, 2),
                     "edge_yes": round(edge_yes, 4),
                     "edge_no": round(edge_no, 4),
                 })
-                print(f"[green]OPEN[/green] {mid} {side} size=${pos.size_usd:.2f} price={pos.entry_price:.4f} model={best_model} conf={conf} cons={consensus}")
+                print(f"[green]OPEN[/green] {mid} {side} size=${pos.size_usd:.2f} price={pos.entry_price:.4f} model={model_tag} conf={conf} cons={consensus}")
             continue
 
         # Close policy v1: resolve proxy + tp ladder + stops + time decay + flip stop.
@@ -1066,6 +1123,13 @@ def run_once(cfg: dict):
                 close_reason, close_frac = "hard_stop_25", 1.0
             elif u_pnl <= -0.15 and flip:
                 close_reason, close_frac = "flip_stop", 1.0
+            # Fast scalp exits: enter on impulse, exit quickly after PM reaction.
+            elif str(open_pos.model or "").startswith("SCALP:") and u_pnl >= 0.02:
+                close_reason, close_frac = "scalp_take_quick", 1.0
+            elif str(open_pos.model or "").startswith("SCALP:") and held_s >= 30:
+                close_reason, close_frac = "scalp_timeout", 1.0
+            elif str(open_pos.model or "").startswith("SCALP:") and held_edge < 0.004:
+                close_reason, close_frac = "scalp_edge_faded", 1.0
             # mispricing goes wrong-way: cut/flip risk (after brief hold to reduce churn)
             elif held_s >= min_hold_for_flip_exit_s and held_edge <= -0.01 and opp_edge >= 0.02:
                 close_reason, close_frac = "edge_flip_wrong_way", 1.0
@@ -1108,6 +1172,30 @@ def run_once(cfg: dict):
                         ms["trades"] = int(ms.get("trades", 0)) + 1
                         ms["wins"] = int(ms.get("wins", 0)) + (1 if pnl > 0 else 0)
                         ms["pnl"] = float(ms.get("pnl", 0.0)) + float(pnl)
+
+                    # Guardrail: lock a market after repeated wrong-way flip exits with non-positive outcomes.
+                    streak = int(_FLIP_FAIL_STREAK.get(mid, 0) or 0)
+                    if close_reason == "edge_flip_wrong_way" and pnl <= 0:
+                        streak += 1
+                    elif close_reason in {"edge_trailing_stop", "tp_50", "tp_35_half", "time_lt_90s_bank", "resolved_win_proxy"} and pnl > 0:
+                        streak = 0
+                    else:
+                        streak = max(0, streak - 1)
+                    _FLIP_FAIL_STREAK[mid] = streak
+
+                    if streak >= 2:
+                        lock_s = min(900, 300 + (streak - 2) * 180)
+                        _MARKET_LOCK_UNTIL[mid] = datetime.now(timezone.utc).timestamp() + lock_s
+                        append_event(cfg["storage"]["events_path"], {
+                            "type": "market_guardrail",
+                            "market_id": mid,
+                            "reason": "flip_streak_lockout",
+                            "flip_fail_streak": streak,
+                            "lock_seconds": lock_s,
+                            "lock_until_ts": _MARKET_LOCK_UNTIL[mid],
+                            "last_close_reason": close_reason,
+                            "last_pnl_usd": round(float(pnl), 4),
+                        })
 
                 append_event(cfg["storage"]["events_path"], {
                     "type": "paper_trade",
