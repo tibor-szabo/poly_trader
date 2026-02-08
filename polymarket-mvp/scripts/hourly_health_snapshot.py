@@ -6,10 +6,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EVENTS = ROOT / "data" / "events.jsonl"
 
+
 def ps_count(pattern: str) -> int:
     cmd = f"ps aux | egrep '{pattern}' | egrep -v 'egrep|grep' | wc -l"
     out = subprocess.check_output(cmd, shell=True, text=True).strip()
     return int(out or 0)
+
 
 last = {}
 if EVENTS.exists():
@@ -19,7 +21,7 @@ if EVENTS.exists():
         except Exception:
             continue
         t = e.get("type")
-        if t in {"market_scan", "inefficiency_report", "weather_scan"}:
+        if t in {"market_scan", "inefficiency_report", "weather_scan", "ws_usage", "market_groups"}:
             last[t] = e
 
 loop_n = ps_count(r"polymarket_mvp\.loop")
@@ -54,3 +56,26 @@ if ir:
 wx = last.get("weather_scan", {})
 if wx:
     print("weather_scan", wx.get("ts"), f"count={wx.get('count')}")
+
+wu = last.get("ws_usage", {})
+if wu:
+    print(
+        "ws_usage",
+        wu.get("ts"),
+        f"alive={wu.get('alive')}",
+        f"tracked={wu.get('tracked_count')}",
+        f"updates={wu.get('updates_applied')}",
+    )
+
+grp = last.get("market_groups", {})
+if grp:
+    btc = (grp.get("bitcoin") or [{}])[0]
+    if btc:
+        print(
+            "btc_focus",
+            grp.get("ts"),
+            btc.get("market_id"),
+            btc.get("signal"),
+            f"model={btc.get('best_model')}",
+            f"consensus={btc.get('model_consensus')}",
+        )

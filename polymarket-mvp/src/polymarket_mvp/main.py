@@ -11,7 +11,7 @@ from polymarket_mvp.config import load_config
 from polymarket_mvp.adapters.clob import ClobAdapter
 from polymarket_mvp.engine.scoring import score_opportunities, rank_candidates, depth_aware_buy_prices
 from polymarket_mvp.risk.guards import approve
-from polymarket_mvp.sim.paper import open_position, close_position
+from polymarket_mvp.sim.paper import open_position, close_position, close_fraction
 from polymarket_mvp.utils.storage import load_state, save_state, append_event
 from polymarket_mvp.adapters.gamma import GammaAdapter
 from polymarket_mvp.ops_intel import build_market_radar, build_inefficiency_report, build_flow_watch
@@ -26,6 +26,9 @@ _ALT_REFS_TS = 0.0
 _BTC_TARGET_CACHE = {}
 _BTC_PRICE_CACHE = {}
 _BTC_CURRENT_CACHE = {"ts": 0.0, "price": None}
+_BTC_PRICE_CACHE_TTL_OK = 120.0
+_BTC_PRICE_CACHE_TTL_MISS = 20.0
+_BTC_PRICE_FORCE_REFRESH_SECONDS = 60.0
 _BTC_SIGNAL_HISTORY = []
 _MODEL_STATS = {
     "TA": {"trades": 0, "wins": 0, "pnl": 0.0},
@@ -33,6 +36,7 @@ _MODEL_STATS = {
     "RG": {"trades": 0, "wins": 0, "pnl": 0.0},
     "BK": {"trades": 0, "wins": 0, "pnl": 0.0},
 }
+_LAST_CLOSE_TS = {}
 
 
 def _ensure_ws_hook() -> ClobWsHook:
@@ -110,6 +114,21 @@ def _price_ago(sec: float) -> Optional[float]:
     return float(_BTC_SIGNAL_HISTORY[0]["p"])
 
 
+def _price_near_ts(ts: float, max_delta_s: float = 120.0) -> Optional[float]:
+    if not _BTC_SIGNAL_HISTORY:
+        return None
+    best = None
+    best_dt = 1e18
+    for x in _BTC_SIGNAL_HISTORY:
+        dt = abs(float(x.get("t", 0.0)) - float(ts))
+        if dt < best_dt:
+            best_dt = dt
+            best = float(x.get("p"))
+    if best is None or best_dt > max_delta_s:
+        return None
+    return best
+
+
 def _compute_btc_signal() -> dict:
     if len(_BTC_SIGNAL_HISTORY) < 5:
         return {"p_up": 0.5, "lead_bps": 0.0, "rf": 0.0, "rs": 0.0, "sigma": 0.0001, "rsi_n": 0.0}
@@ -185,44 +204,73 @@ def _model_weight(name: str) -> float:
 
 def _model_compare(row: dict, signal: dict) -> dict:
     p_ta = max(0.02, min(0.98, float(signal.get("p_up", 0.5))))
-    ta = _bids_from_p(row, p_ta, 0.006)
-    z = max(-1.5, min(1.5, float(signal.get("lead_bps", 0.0)) / 35.0))
-    ll = _bids_from_p(row, max(0.02, min(0.98, 0.5 + 0.18 * z)), 0.006)
+    p_ll = max(0.02, min(0.98, 0.5 + 0.18 * max(-1.5, min(1.5, float(signal.get("lead_bps", 0.0)) / 35.0))))
     trend = abs(float(signal.get("rf", 0.0))) + abs(float(signal.get("rs", 0.0)))
     chop = float(signal.get("sigma", 0.0))
     w_trend = max(0.1, min(0.9, trend / max(trend + chop, 1e-6)))
     p_mr = max(0.02, min(0.98, 0.5 - 0.35 * float(signal.get("rsi_n", 0.0))))
-    rg = _bids_from_p(row, max(0.02, min(0.98, w_trend * p_ta + (1 - w_trend) * p_mr)), 0.0065)
+    p_rg = max(0.02, min(0.98, w_trend * p_ta + (1 - w_trend) * p_mr))
+
+    # Target/time anchor: probability of finishing above target increases with
+    # (current-target) and decreases with less time + higher uncertainty.
+    target = float(row.get("btc_target") or 0.0)
+    current = float(row.get("btc_current") or row.get("btc_current_binance") or 0.0)
+    end_ts = float(row.get("end_ts") or 0.0)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    t_left = max(1.0, end_ts - now_ts) if end_ts > 0 else 900.0
+    # Convert short-horizon return sigma to price sigma envelope.
+    sigma_ret = max(float(signal.get("sigma", 0.00012)), 0.00005)
+    sigma_price = max(current * sigma_ret * math.sqrt(max(5.0, t_left)), 8.0) if current > 0 else 50.0
+    if target > 0 and current > 0:
+        z_anchor = max(-8.0, min(8.0, (current - target) / sigma_price))
+        p_anchor = 1.0 / (1.0 + math.exp(-z_anchor))
+    else:
+        p_anchor = 0.5
+
     ay = float(row.get("best_ask_yes") or 0.0)
     an = float(row.get("best_ask_no") or 0.0)
     by = float(row.get("best_bid_yes") or 0.0)
     bn = float(row.get("best_bid_no") or 0.0)
     sy = max(0.0, ay - by) if ay > 0 else 0.01
     sn = max(0.0, an - bn) if an > 0 else 0.01
-    bk = _bids_from_p(row, max(0.02, min(0.98, 0.5 + 0.12 * (sn - sy))), 0.006)
+    p_bk = max(0.02, min(0.98, 0.5 + 0.12 * (sn - sy)))
+
+    ta = _bids_from_p(row, p_ta, 0.006)
+    ll = _bids_from_p(row, p_ll, 0.006)
+    rg = _bids_from_p(row, p_rg, 0.0065)
+    bk = _bids_from_p(row, p_bk, 0.006)
 
     models = {"TA": ta, "LL": ll, "RG": rg, "BK": bk}
+    probs = {"TA": p_ta, "LL": p_ll, "RG": p_rg, "BK": p_bk, "ANCHOR": p_anchor}
+    weights = {k: _model_weight(k) for k in ["TA", "LL", "RG", "BK"]}
+    # Anchor gets dynamic weight: stronger near expiry, softer when far out.
+    w_anchor = max(0.6, min(2.0, 1.6 - min(t_left, 900.0) / 900.0))
+    weights["ANCHOR"] = w_anchor
+    wsum = sum(weights.values()) or 1.0
+    p_yes_ens = sum(probs[k] * weights[k] for k in probs.keys()) / wsum
+
     scored = []
-    for name, pair in models.items():
-        if not pair or pair[0] is None or pair[1] is None:
-            continue
-        y, n = pair
-        direction = "BUY_YES" if y >= n else "BUY_NO"
-        strength = abs(y - n)
-        wgt = _model_weight(name)
-        scored.append((strength * wgt, name, direction, y, n, strength))
+    for name, p in probs.items():
+        direction = "BUY_YES" if p >= 0.5 else "BUY_NO"
+        strength = abs((2.0 * p) - 1.0)
+        wgt = weights.get(name, 1.0)
+        scored.append((strength * wgt, name, direction, strength))
     if not scored:
-        return {"models": models, "best": "-", "side": None, "confidence": 0, "weights": {k: round(_model_weight(k), 3) for k in models.keys()}}
+        return {"models": models, "probs": probs, "p_yes_ens": p_yes_ens, "best": "-", "side": None, "confidence": 0, "weights": {k: round(v, 3) for k, v in weights.items()}}
     scored.sort(reverse=True)
-    _, best_name, side, _, _, base_strength = scored[0]
-    agree = sum(1 for _, _, d, _, _, _ in scored if d == side) / len(scored)
+    _, best_name, side, base_strength = scored[0]
+    agree = sum(1 for _, _, d, _ in scored if d == side) / len(scored)
     confidence = int(max(1, min(99, round((0.6 * base_strength + 0.4 * agree) * 100))))
+    consensus = int(sum(1 for _, _, d, _ in scored if d == side))
     return {
         "models": models,
+        "probs": probs,
+        "p_yes_ens": p_yes_ens,
         "best": best_name,
         "side": side,
         "confidence": confidence,
-        "weights": {k: round(_model_weight(k), 3) for k in models.keys()},
+        "consensus": consensus,
+        "weights": {k: round(v, 3) for k, v in weights.items()},
     }
 
 
@@ -230,8 +278,15 @@ def _polymarket_btc_prices(event_start_iso: str, end_iso: str, variant: str = "f
     if not event_start_iso:
         return None, None
     key = f"{event_start_iso}|{end_iso}|{variant}"
-    if key in _BTC_PRICE_CACHE:
-        return _BTC_PRICE_CACHE[key]
+    now = datetime.now(timezone.utc).timestamp()
+    cached = _BTC_PRICE_CACHE.get(key)
+    if cached:
+        open_px, current_px, ts = cached
+        age = now - float(ts or 0.0)
+        ttl = _BTC_PRICE_CACHE_TTL_OK if (open_px is not None) else _BTC_PRICE_CACHE_TTL_MISS
+        # Force at least one refresh per minute for rolling BTC windows.
+        if age <= min(ttl, _BTC_PRICE_FORCE_REFRESH_SECONDS):
+            return open_px, current_px
 
     open_px = None
     current_px = None
@@ -257,7 +312,7 @@ def _polymarket_btc_prices(event_start_iso: str, end_iso: str, variant: str = "f
     except Exception:
         pass
 
-    _BTC_PRICE_CACHE[key] = (open_px, current_px)
+    _BTC_PRICE_CACHE[key] = (open_px, current_px, now)
     return open_px, current_px
 
 
@@ -587,15 +642,52 @@ def run_once(cfg: dict):
         src = getattr(rr, "resolution_source", "") if rr else ""
         st = getattr(rr, "event_start_time", "") if rr else ""
         ed = getattr(rr, "end_date", "") if rr else ""
+        if not st and ed:
+            _ed = _parse_dt(ed)
+            if _ed is not None:
+                if _ed.tzinfo is None:
+                    _ed = _ed.replace(tzinfo=timezone.utc)
+                st = (_ed - timedelta(minutes=15)).isoformat()
         target_px, current_px = _polymarket_btc_prices(st, ed, variant="fifteen")
         chainlink_live, binance_live = _btc_live_prices()
         if current_px is None:
-            current_px = chainlink_live
+            current_px = chainlink_live if chainlink_live is not None else binance_live
+
+        mid = str(r.get("market_id"))
+        st_dt = _parse_dt(st) if st else None
+        if st_dt is not None and st_dt.tzinfo is None:
+            st_dt = st_dt.replace(tzinfo=timezone.utc)
+
+        # Fallbacks for missing target: cached by market_id, or infer from BTC ticks near start.
+        if target_px is None and mid in _BTC_TARGET_CACHE:
+            target_px = _BTC_TARGET_CACHE[mid]
+        if target_px is None and st_dt is not None and datetime.now(timezone.utc) >= st_dt:
+            inferred = _price_near_ts(st_dt.timestamp(), max_delta_s=1200.0)
+            if inferred is not None:
+                target_px = inferred
+            elif current_px is not None:
+                # Fallback when upstream openPrice is unavailable: lock first seen live price after start.
+                target_px = float(current_px)
+        if target_px is not None:
+            _BTC_TARGET_CACHE[mid] = float(target_px)
+
         r["btc_price_source"] = src or "https://data.chain.link/streams/btc-usd"
         r["btc_target"] = round(target_px, 2) if target_px is not None else None
+        if target_px is None:
+            append_event(cfg["storage"]["events_path"], {
+                "type": "btc_target_missing",
+                "market_id": r.get("market_id"),
+                "event_start_time": st,
+                "end_date": ed,
+            })
         r["btc_current"] = round(current_px, 2) if current_px is not None else None
         r["btc_current_binance"] = round(binance_live, 2) if binance_live is not None else None
         r["btc_target_start"] = st
+        dt_end = _parse_dt(ed)
+        if dt_end is not None:
+            if dt_end.tzinfo is None:
+                dt_end = dt_end.replace(tzinfo=timezone.utc)
+            r["end_ts"] = dt_end.timestamp()
 
         _update_btc_signal_history(current_px, binance_live)
         sigm = _compute_btc_signal()
@@ -607,6 +699,19 @@ def run_once(cfg: dict):
         r["best_model"] = f"{cmp['best']}:{'UP' if cmp.get('side')=='BUY_YES' else 'DOWN'} {cmp.get('confidence',0)}%" if cmp.get("side") else "-"
         r["model_side"] = cmp.get("side")
         r["model_confidence"] = cmp.get("confidence", 0)
+        r["model_consensus"] = cmp.get("consensus", 0)
+        p_yes = float(cmp.get("p_yes_ens", 0.5))
+        probs = cmp.get("probs") or {}
+        r["p_yes_model"] = round(p_yes, 4)
+        r["p_anchor"] = round(float(probs.get("ANCHOR", 0.5)), 4)
+        if r.get("end_ts"):
+            r["t_left_s"] = max(0, int(float(r.get("end_ts")) - datetime.now(timezone.utc).timestamp()))
+        r["p_no_model"] = round(1.0 - p_yes, 4)
+        r["edge_yes"] = round(p_yes - float(r.get("best_ask_yes") or 0.0), 4)
+        r["edge_no"] = round((1.0 - p_yes) - float(r.get("best_ask_no") or 0.0), 4)
+
+    # Display only BTC markets with known target to avoid misleading blanks.
+    btc_rows = [r for r in btc_rows if r.get("btc_target") is not None]
 
     alt_ref_by_id = {r.market_id: r for r in alt_refs}
     alt_rows = [row_by_market[m] for m in alt_ids if m in row_by_market]
@@ -737,12 +842,17 @@ def run_once(cfg: dict):
 
     # Model-driven BTC paper trading simulation.
     trade_cap = 100.0
+    max_open_positions = 2
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
 
     for r in btc_rows:
+        # Trade only markets with known target BTC.
+        if r.get("btc_target") is None:
+            continue
         mid = str(r.get("market_id"))
         side = r.get("model_side")
         conf = int(r.get("model_confidence") or 0)
+        consensus = int(r.get("model_consensus") or 0)
         best_model = str(r.get("best_model") or "-")
         if not side:
             continue
@@ -751,8 +861,46 @@ def run_once(cfg: dict):
         ask_no = float(r.get("best_ask_no") or 0.0)
         open_pos = open_map.get(mid)
 
-        # Open rule: confident directional model, one open position per market.
-        if open_pos is None and conf >= 30:
+        edge_yes = float(r.get("edge_yes") or 0.0)
+        edge_no = float(r.get("edge_no") or 0.0)
+        open_edge = max(edge_yes, edge_no)
+
+        btc_now = float(r.get("btc_current") or 0.0)
+        btc_target = float(r.get("btc_target") or 0.0)
+        t_left_s = max(0.0, float(r.get("t_left_s") or 0.0))
+        winner_side = "BUY_YES" if btc_now >= btc_target else "BUY_NO"
+        dist_bps = ((btc_now - btc_target) / btc_target * 10000.0) if btc_target > 0 else 0.0
+        # Reversal belief from ensemble probability.
+        p_yes = float(r.get("p_yes_model") or 0.5)
+        reversal_belief = (winner_side == "BUY_YES" and p_yes < 0.42) or (winner_side == "BUY_NO" and p_yes > 0.58)
+
+        append_event(cfg["storage"]["events_path"], {
+            "type": "strategy_snapshot",
+            "market_id": mid,
+            "side": side,
+            "winner_side": winner_side,
+            "distance_bps": round(dist_bps, 2),
+            "reversal_belief": bool(reversal_belief),
+            "confidence": conf,
+            "consensus": consensus,
+            "best_model": best_model,
+            "edge_yes": edge_yes,
+            "edge_no": edge_no,
+            "open_positions": len(open_map),
+        })
+
+        # Open rule v2: follow currently winning direction by default;
+        # only fade when strong reversal belief + stronger edge.
+        cool_ok = (datetime.now(timezone.utc).timestamp() - float(_LAST_CLOSE_TS.get(mid, 0.0))) > 120
+        open_side = winner_side
+        required_edge = 0.02
+        if reversal_belief:
+            open_side = "BUY_NO" if winner_side == "BUY_YES" else "BUY_YES"
+            required_edge = 0.05
+
+        side_edge = edge_yes if open_side == "BUY_YES" else edge_no
+        if open_pos is None and conf >= 45 and consensus >= 3 and side_edge >= required_edge and len(open_map) < max_open_positions and cool_ok:
+            side = open_side
             entry = ask_yes if side == "BUY_YES" else ask_no
             size_usd = min(trade_cap, float(state.cash_usd))
             if entry > 0 and size_usd >= 1.0:
@@ -765,6 +913,8 @@ def run_once(cfg: dict):
                     size_usd=size_usd,
                     model=best_model,
                 )
+                pos.edge_entry = float(edge_yes if side == "BUY_YES" else edge_no)
+                open_map[mid] = pos
                 append_event(cfg["storage"]["events_path"], {
                     "type": "paper_trade",
                     "action": "OPEN",
@@ -776,44 +926,107 @@ def run_once(cfg: dict):
                     "opened_at": pos.opened_at,
                     "model": best_model,
                     "confidence": conf,
+                    "consensus": consensus,
+                    "edge_yes": round(edge_yes, 4),
+                    "edge_no": round(edge_no, 4),
                 })
-                print(f"[green]OPEN[/green] {mid} {side} size=${pos.size_usd:.2f} price={pos.entry_price:.4f} model={best_model}")
+                print(f"[green]OPEN[/green] {mid} {side} size=${pos.size_usd:.2f} price={pos.entry_price:.4f} model={best_model} conf={conf} cons={consensus}")
             continue
 
-        # Close rule: model flips with sufficient confidence.
+        # Close policy v1: resolve proxy + tp ladder + stops + time decay + flip stop.
         if open_pos is not None:
-            flip = (side != open_pos.side) and conf >= 30
-            if flip:
-                exit_price = ask_yes if open_pos.side == "BUY_YES" else ask_no
-                if exit_price > 0:
-                    open_pos.close_model = best_model
+            exit_price = ask_yes if open_pos.side == "BUY_YES" else ask_no
+            if exit_price <= 0:
+                continue
+
+            entry = float(open_pos.entry_price or 0.0)
+            u_pnl = ((exit_price - entry) / entry) if entry > 0 else 0.0
+            if open_pos.side == "BUY_NO":
+                # BUY_NO still marks against NO ask directly (same price-space), no inversion needed.
+                u_pnl = ((exit_price - entry) / entry) if entry > 0 else 0.0
+
+            now_ts = datetime.now(timezone.utc).timestamp()
+            end_ts = float(r.get("end_ts") or 0.0)
+            t_left = (end_ts - now_ts) if end_ts > 0 else 999999.0
+            held_edge = edge_yes if open_pos.side == "BUY_YES" else edge_no
+            opp_edge = edge_no if open_pos.side == "BUY_YES" else edge_yes
+            flip = (side != open_pos.side) and conf >= 55
+            against_winner = (open_pos.side != winner_side)
+
+            close_reason = None
+            close_frac = 0.0
+
+            # Resolve proxy
+            if exit_price >= 0.99:
+                close_reason, close_frac = "resolved_win_proxy", 1.0
+            elif exit_price <= 0.01:
+                close_reason, close_frac = "resolved_loss_proxy", 1.0
+            # hard stops
+            elif u_pnl <= -0.25:
+                close_reason, close_frac = "hard_stop_25", 1.0
+            elif u_pnl <= -0.15 and flip:
+                close_reason, close_frac = "flip_stop", 1.0
+            # mispricing goes wrong-way: cut/flip risk
+            elif held_edge <= -0.01 and opp_edge >= 0.02:
+                close_reason, close_frac = "edge_flip_wrong_way", 1.0
+            elif held_edge < 0.0 and u_pnl < 0:
+                close_reason, close_frac = "edge_decay_stop", 1.0
+            # if we're fighting current winner and no real reversal thesis, cut.
+            elif against_winner and (not reversal_belief) and t_left_s < 300:
+                close_reason, close_frac = "against_winner_no_reversal", 1.0
+            # time exits
+            elif t_left < 45:
+                close_reason, close_frac = "time_lt_45s", 1.0
+            elif t_left < 90 and u_pnl > 0:
+                close_reason, close_frac = "time_lt_90s_bank", 1.0
+            elif t_left < 180 and conf < 58:
+                close_reason, close_frac = "time_lt_180s_low_conf", 1.0
+            # take profit ladder (single-step per cycle)
+            elif u_pnl >= 0.50:
+                close_reason, close_frac = "tp_50", 1.0
+            elif u_pnl >= 0.35:
+                close_reason, close_frac = "tp_35_half", 0.5
+
+            if close_frac > 0:
+                open_pos.close_model = best_model
+                open_pos.close_reason = close_reason
+                open_model_name = str(open_pos.model or "").split(":", 1)[0]
+                if close_frac >= 1.0:
                     pnl = close_position(state, open_pos, exit_price)
-                    open_model_name = str(open_pos.model or "").split(":", 1)[0]
+                    _LAST_CLOSE_TS[mid] = datetime.now(timezone.utc).timestamp()
+                else:
+                    pnl = close_fraction(state, open_pos, exit_price, close_frac)
+                    open_pos.pnl_usd = float((open_pos.pnl_usd or 0.0) + pnl)
+
+                # Model learning updates only on full close (clean attribution)
+                if close_frac >= 1.0:
                     ms = _MODEL_STATS.get(open_model_name)
                     if ms is not None:
                         ms["trades"] = int(ms.get("trades", 0)) + 1
                         ms["wins"] = int(ms.get("wins", 0)) + (1 if pnl > 0 else 0)
                         ms["pnl"] = float(ms.get("pnl", 0.0)) + float(pnl)
-                    append_event(cfg["storage"]["events_path"], {
-                        "type": "paper_trade",
-                        "action": "CLOSE",
-                        "market_id": mid,
-                        "market_name": open_pos.market_name,
-                        "side": open_pos.side,
-                        "entry_price": round(open_pos.entry_price, 4),
-                        "exit_price": round(exit_price, 4),
-                        "opened_at": open_pos.opened_at,
-                        "closed_at": open_pos.closed_at,
-                        "pnl_usd": round(pnl, 4),
-                        "model_open": open_pos.model,
-                        "model_close": best_model,
-                        "confidence": conf,
-                    })
-                    append_event(cfg["storage"]["events_path"], {
-                        "type": "model_stats",
-                        "stats": _MODEL_STATS,
-                    })
-                    print(f"[magenta]CLOSE[/magenta] {mid} {open_pos.side} exit={exit_price:.4f} pnl=${pnl:.2f} model={best_model}")
+
+                append_event(cfg["storage"]["events_path"], {
+                    "type": "paper_trade",
+                    "action": "CLOSE" if close_frac >= 1.0 else "PARTIAL_CLOSE",
+                    "reason": close_reason,
+                    "fraction": close_frac,
+                    "market_id": mid,
+                    "market_name": open_pos.market_name,
+                    "side": open_pos.side,
+                    "entry_price": round(entry, 4),
+                    "exit_price": round(exit_price, 4),
+                    "opened_at": open_pos.opened_at,
+                    "closed_at": open_pos.closed_at if close_frac >= 1.0 else None,
+                    "pnl_usd": round(pnl, 4),
+                    "model_open": open_pos.model,
+                    "model_close": best_model,
+                    "confidence": conf,
+                    "held_edge": round(held_edge, 4),
+                    "opp_edge": round(opp_edge, 4),
+                })
+                append_event(cfg["storage"]["events_path"], {"type": "model_stats", "stats": _MODEL_STATS})
+                print(f"[magenta]{'CLOSE' if close_frac>=1 else 'PARTIAL'}[/magenta] {mid} {open_pos.side} reason={close_reason} pnl=${pnl:.2f}")
 
     save_state(cfg["storage"]["state_path"], state)
     print(f"[bold]State[/bold] cash=${state.cash_usd:.2f} positions={len(state.positions)} pnl=${state.realized_pnl_usd:.2f}")

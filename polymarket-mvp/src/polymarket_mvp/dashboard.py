@@ -295,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
   <div class='card'>
     <h3 style='margin:0 0 12px 0;'>Positions Log (paper simulation)</h3>
     <div class='k' id='oppMeta'>No positions yet.</div>
+    <div class='k' id='edgeQaMeta' style='margin-top:6px'></div>
     <table>
       <thead>
         <tr>
@@ -580,14 +581,26 @@ function render(d) {
 
   const oppRows = document.getElementById('oppRows');
   const oppMeta = document.getElementById('oppMeta');
+  const edgeQaMeta = document.getElementById('edgeQaMeta');
   oppRows.innerHTML = '';
   const openPos = (st.positions || []).filter(p => p.status === 'open');
   const closedPos = (st.closed_positions || []).slice(-20).reverse();
   const items = [...openPos, ...closedPos];
   if (!items.length) {
     oppMeta.textContent = 'No positions yet.';
+    if (edgeQaMeta) edgeQaMeta.textContent = '';
   } else {
     oppMeta.textContent = `Open: ${openPos.length} | Closed: ${(st.closed_positions || []).length}`;
+    const cls = st.closed_positions || [];
+    if (edgeQaMeta && cls.length) {
+      const n = cls.length;
+      const wins = cls.filter(x => Number(x.pnl_usd || 0) > 0).length;
+      const avgPnl = cls.reduce((a,x)=>a+Number(x.pnl_usd||0),0)/Math.max(1,n);
+      const withEdge = cls.filter(x => Number.isFinite(Number(x.edge_entry)));
+      const avgEdge = withEdge.length ? (withEdge.reduce((a,x)=>a+Number(x.edge_entry||0),0)/withEdge.length) : NaN;
+      edgeQaMeta.textContent = `Edge QA: trades=${n} winrate=${Math.round((wins/n)*100)}% avgPnL=${avgPnl.toFixed(2)} avgOpenEdge=${Number.isFinite(avgEdge)?avgEdge.toFixed(4):'-'}`;
+    }
+
     for (const x of items) {
       const tr = document.createElement('tr');
       const statusCls = x.status === 'open' ? 'watch' : 'ok';
