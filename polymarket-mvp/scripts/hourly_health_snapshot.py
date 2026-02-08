@@ -132,7 +132,10 @@ if snap:
         f"open_positions={snap.get('open_positions')}",
     )
 
+missing_ids = sorted(btc_target_missing_markets_1h)
 print(
     f"btc_target_missing_1h={btc_target_missing_1h}"
-    f" unique_markets={len(btc_target_missing_markets_1h)}"
+    f" unique_markets={len(missing_ids)}"
 )
+if missing_ids:
+    print("btc_target_missing_market_ids", ",".join(missing_ids[:5]))
