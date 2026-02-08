@@ -28,6 +28,7 @@ def to_epoch(ts):
 
 last = {}
 btc_target_missing_1h = 0
+btc_target_missing_markets_1h = set()
 now = time.time()
 
 if EVENTS.exists():
@@ -52,6 +53,9 @@ if EVENTS.exists():
             ts = to_epoch(e.get("ts"))
             if ts and now - ts <= 3600:
                 btc_target_missing_1h += 1
+                mid = str(e.get("market_id") or "")
+                if mid:
+                    btc_target_missing_markets_1h.add(mid)
 
 loop_n = ps_count(r"polymarket_mvp\.loop")
 dash_n = ps_count(r"polymarket_mvp\.dashboard")
@@ -123,4 +127,7 @@ if snap:
         f"open_positions={snap.get('open_positions')}",
     )
 
-print(f"btc_target_missing_1h={btc_target_missing_1h}")
+print(
+    f"btc_target_missing_1h={btc_target_missing_1h}"
+    f" unique_markets={len(btc_target_missing_markets_1h)}"
+)
