@@ -27,6 +27,13 @@ def to_epoch(ts):
     return None
 
 
+def age_minutes(ts):
+    t = to_epoch(ts)
+    if not t:
+        return None
+    return round((time.time() - t) / 60.0, 1)
+
+
 last = {}
 btc_target_missing_1h = 0
 btc_target_missing_markets_1h = set()
@@ -74,9 +81,11 @@ if ms:
         (x for x in cands if (x.get("signal") or "").upper() not in {"NO_OPPORTUNITY", "NO_TRADE"}),
         cands[0] if cands else {},
     )
+    age = age_minutes(ms.get("ts"))
     print(
         "market_scan",
         ms.get("ts"),
+        f"age_min={age}",
         c.get("market_id"),
         c.get("signal"),
         f"exec_sum={c.get('yes_no_exec_sum')}",
@@ -101,12 +110,16 @@ if wx:
 
 wu = last.get("ws_usage", {})
 if wu:
+    age = age_minutes(wu.get("ts"))
+    stale = age is not None and age > 10
     print(
         "ws_usage",
         wu.get("ts"),
+        f"age_min={age}",
         f"alive={wu.get('alive')}",
         f"tracked={wu.get('tracked_count')}",
         f"updates={wu.get('updates_applied')}",
+        f"status={'STALE' if stale else 'OK'}",
     )
 
 grp = last.get("market_groups", {})
@@ -116,6 +129,7 @@ if grp:
         print(
             "btc_focus",
             grp.get("ts"),
+            f"age_min={age_minutes(grp.get('ts'))}",
             btc.get("market_id"),
             btc.get("signal"),
             f"model={btc.get('best_model')}",
@@ -127,6 +141,7 @@ if snap:
     print(
         "strategy",
         snap.get("ts"),
+        f"age_min={age_minutes(snap.get('ts'))}",
         snap.get("market_id"),
         snap.get("winner_side"),
         f"open_positions={snap.get('open_positions')}",
