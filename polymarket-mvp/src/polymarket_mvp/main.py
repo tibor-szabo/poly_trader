@@ -1023,7 +1023,7 @@ def run_once(cfg: dict):
         lock_ok = now_epoch >= lock_until
         cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok
         open_side = winner_side
-        required_edge = 0.025 if winner_side == "BUY_YES" else 0.04
+        required_edge = 0.03 if winner_side == "BUY_YES" else 0.04
         if p_hit > 0.65 and winner_stability >= 0.7:
             required_edge *= 0.85
         if reversal_belief:
@@ -1045,7 +1045,7 @@ def run_once(cfg: dict):
         impulse_side = impulse.get("side")
         impulse_bps = float(impulse.get("bps_3s") or 0.0)
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 7.0 and impulse_edge >= 0.012 and len(open_map) < max_open_positions and cool_ok
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 7.0 and impulse_edge >= 0.015 and len(open_map) < max_open_positions and cool_ok
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
@@ -1108,7 +1108,7 @@ def run_once(cfg: dict):
             t_left = (end_ts - now_ts) if end_ts > 0 else 999999.0
             held_edge = edge_yes if open_pos.side == "BUY_YES" else edge_no
             opp_edge = edge_no if open_pos.side == "BUY_YES" else edge_yes
-            flip = (side != open_pos.side) and conf >= 55
+            flip = (side != open_pos.side) and conf >= 62
             against_winner = (open_pos.side != winner_side)
 
             peak = float(open_pos.edge_peak if open_pos.edge_peak is not None else (open_pos.edge_entry or held_edge or 0.0))

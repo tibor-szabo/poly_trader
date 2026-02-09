@@ -52,8 +52,8 @@ strategy:
   trade_cap_usd: 100
   max_open_positions: 2
   base_reentry_cooldown_s: 120
-  flip_reentry_cooldown_s: 300
-  min_hold_for_flip_exit_s: 25
+  flip_reentry_cooldown_s: 420
+  min_hold_for_flip_exit_s: 35
 
 storage:
   state_path: "data/state.json"
