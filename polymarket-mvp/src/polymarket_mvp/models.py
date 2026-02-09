@@ -46,6 +46,7 @@ class PaperPosition(BaseModel):
     model: str = ""  # model used to open
     close_model: Optional[str] = None  # model used to close
     edge_entry: Optional[float] = None
+    edge_peak: Optional[float] = None
     close_reason: Optional[str] = None
 
 

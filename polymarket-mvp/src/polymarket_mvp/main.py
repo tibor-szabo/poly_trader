@@ -993,6 +993,10 @@ def run_once(cfg: dict):
     base_reentry_cooldown_s = float(strategy_cfg.get("base_reentry_cooldown_s", 120.0))
     flip_reentry_cooldown_s = float(strategy_cfg.get("flip_reentry_cooldown_s", 240.0))
     min_hold_for_flip_exit_s = float(strategy_cfg.get("min_hold_for_flip_exit_s", 20.0))
+    flip_stop_loss_pct = float(strategy_cfg.get("flip_stop_loss_pct", -0.12))
+    buy_no_flip_stop_loss_pct = float(strategy_cfg.get("buy_no_flip_stop_loss_pct", -0.10))
+    normal_open_min_winner_stability = float(strategy_cfg.get("normal_open_min_winner_stability", 0.12))
+    normal_open_max_opposing_impulse_bps = float(strategy_cfg.get("normal_open_max_opposing_impulse_bps", 3.0))
     buy_no_conf_floor = int(strategy_cfg.get("buy_no_conf_floor", 52))
     buy_no_consensus_floor = int(strategy_cfg.get("buy_no_consensus_floor", 4))
     buy_no_reentry_cooldown_mult = float(strategy_cfg.get("buy_no_reentry_cooldown_mult", 1.35))
@@ -1115,8 +1119,13 @@ def run_once(cfg: dict):
             consensus_floor += 1
         # Avoid late contrarian flips when winner side is already stable.
         late_contrarian_block = (t_left_s < 240) and (winner_stability >= 0.70) and (open_side != winner_side)
+        low_stability_block = winner_stability < normal_open_min_winner_stability
+        impulse_against_open = (
+            (open_side == "BUY_YES" and impulse_bps <= -abs(normal_open_max_opposing_impulse_bps))
+            or (open_side == "BUY_NO" and impulse_bps >= abs(normal_open_max_opposing_impulse_bps))
+        )
 
-        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block)
+        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block) and (not low_stability_block) and (not impulse_against_open)
 
         # Fast Binance impulse scalp: take movement direction, then exit quickly when edge decays.
         impulse_side = impulse.get("side")
@@ -1204,7 +1213,7 @@ def run_once(cfg: dict):
             # hard stops
             elif u_pnl <= -0.25:
                 close_reason, close_frac = "hard_stop_25", 1.0
-            elif u_pnl <= -0.15 and flip:
+            elif flip and u_pnl <= (buy_no_flip_stop_loss_pct if open_pos.side == "BUY_NO" else flip_stop_loss_pct):
                 close_reason, close_frac = "flip_stop", 1.0
             # Fast scalp exits: enter on impulse, exit quickly after PM reaction.
             elif str(open_pos.model or "").startswith("SCALP:") and u_pnl >= 0.02:

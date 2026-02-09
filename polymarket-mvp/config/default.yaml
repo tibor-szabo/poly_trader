@@ -60,6 +60,8 @@ strategy:
   buy_no_conf_floor: 54
   buy_no_consensus_floor: 5
   buy_no_reentry_cooldown_mult: 1.45
+  normal_open_min_winner_stability: 0.12
+  normal_open_max_opposing_impulse_bps: 3.0
 
 storage:
   state_path: "data/state.json"
