@@ -202,3 +202,9 @@ elif btc_target_missing_15m >= 4:
 else:
     health_15m = "OK"
 print("btc_discovery_health_15m", health_15m, f"missing_15m={btc_target_missing_15m}")
+
+missing_rate_30m = round(btc_target_missing_30m / 30.0, 2)
+print("btc_discovery_missing_rate_30m", f"per_min={missing_rate_30m}")
+
+if health_30m == "HOT":
+    print("btc_discovery_action", "consider_narrowing_focus_or_refreshing_target_set")
