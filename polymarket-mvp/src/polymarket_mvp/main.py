@@ -1117,6 +1117,10 @@ def run_once(cfg: dict):
         if open_side == "BUY_NO" and last_close_side == "BUY_NO" and last_close_pnl <= 0 and (now_epoch - last_close_ts) < 1800:
             conf_floor += 4
             consensus_floor += 1
+        # Fast Binance impulse scalp: take movement direction, then exit quickly when edge decays.
+        impulse_side = impulse.get("side")
+        impulse_bps = float(impulse.get("bps_3s") or 0.0)
+
         # Avoid late contrarian flips when winner side is already stable.
         late_contrarian_block = (t_left_s < 240) and (winner_stability >= 0.70) and (open_side != winner_side)
         low_stability_block = winner_stability < normal_open_min_winner_stability
@@ -1127,9 +1131,6 @@ def run_once(cfg: dict):
 
         normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block) and (not low_stability_block) and (not impulse_against_open)
 
-        # Fast Binance impulse scalp: take movement direction, then exit quickly when edge decays.
-        impulse_side = impulse.get("side")
-        impulse_bps = float(impulse.get("bps_3s") or 0.0)
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
         scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 9.0 and impulse_edge >= 0.02 and len(open_map) < max_open_positions and cool_ok and t_left_s >= 75
 
