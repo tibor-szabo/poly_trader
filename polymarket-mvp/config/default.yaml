@@ -54,6 +54,9 @@ strategy:
   base_reentry_cooldown_s: 120
   flip_reentry_cooldown_s: 420
   min_hold_for_flip_exit_s: 35
+  buy_no_conf_floor: 52
+  buy_no_consensus_floor: 4
+  buy_no_reentry_cooldown_mult: 1.35
 
 storage:
   state_path: "data/state.json"
