@@ -10,7 +10,7 @@ data:
   use_clob_ws: true
   stale_seconds: 30
   max_markets: 30
-  btc_group_size: 6
+  btc_group_size: 4
   alt_group_size: 10
   alt_group_refresh_seconds: 300
   alt_group_horizon_days: 30
