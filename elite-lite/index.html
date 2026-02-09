@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Elite Lite - Prototype</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #9ef; font-family: ui-monospace, Menlo, monospace; }
+    #hud { position: fixed; inset: 10px auto auto 10px; z-index: 10; font-size: 13px; line-height: 1.4; background: rgba(0,0,0,.45); border: 1px solid #245; border-radius: 8px; padding: 8px 10px; }
+    #msg { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 10; background: rgba(0,0,0,.55); border: 1px solid #345; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+    #crosshair { position: fixed; left: 50%; top: 50%; width: 18px; height: 18px; margin-left: -9px; margin-top: -9px; z-index: 10; pointer-events: none; }
+    #crosshair::before,#crosshair::after{content:"";position:absolute;background:#6ff;opacity:.8}
+    #crosshair::before{left:8px;top:0;width:2px;height:18px}
+    #crosshair::after{left:0;top:8px;width:18px;height:2px}
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <div id="hud"></div>
+  <div id="crosshair"></div>
+  <div id="msg">Click to lock pointer · WASD thrust · Shift boost · Mouse steer · Space fire · E dock/trade</div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000006);
+
+    const camera = new THREE.PerspectiveCamera(78, innerWidth/innerHeight, 0.1, 5000);
+    camera.position.set(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+
+    const light = new THREE.PointLight(0x99bbff, 2.0, 2000);
+    light.position.set(0,0,0);
+    scene.add(light);
+
+    // Starfield
+    const starCount = 7000;
+    const starGeo = new THREE.BufferGeometry();
+    const pos = new Float32Array(starCount*3);
+    for (let i=0;i<starCount;i++) {
+      const r = 1800 * Math.cbrt(Math.random());
+      const t = Math.random()*Math.PI*2;
+      const u = Math.acos(2*Math.random()-1);
+      pos[i*3+0] = r*Math.sin(u)*Math.cos(t);
+      pos[i*3+1] = r*Math.sin(u)*Math.sin(t);
+      pos[i*3+2] = r*Math.cos(u);
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.7 })));
+
+    // Planet
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(120, 42, 42),
+      new THREE.MeshStandardMaterial({ color: 0x345b92, metalness: .05, roughness: .95 })
+    );
+    planet.position.set(0, -80, -850);
+    scene.add(planet);
+
+    // Station
+    const station = new THREE.Mesh(
+      new THREE.CylinderGeometry(28, 28, 95, 6, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x777777, emissive: 0x111111, metalness: .8, roughness: .35 })
+    );
+    station.rotation.z = Math.PI/2;
+    station.position.set(140, -20, -620);
+    scene.add(station);
+
+    const stationCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(13,13,20,6),
+      new THREE.MeshStandardMaterial({ color: 0x66ffdd, emissive: 0x225544 })
+    );
+    stationCore.rotation.z = Math.PI/2;
+    stationCore.position.copy(station.position);
+    scene.add(stationCore);
+
+    // Enemy
+    const enemy = new THREE.Mesh(
+      new THREE.OctahedronGeometry(10, 0),
+      new THREE.MeshStandardMaterial({ color: 0xff6644, emissive: 0x330000, metalness:.2, roughness:.6 })
+    );
+    enemy.position.set(-180, 40, -680);
+    scene.add(enemy);
+
+    const keys = {};
+    let pointerLocked = false;
+    let cash = 1000, fuel = 100, cargo = 0, hp = 100, enemyHp = 80;
+    let velocity = new THREE.Vector3(0,0,0);
+    let bullets = [];
+    let enemyBullets = [];
+    let cooldown = 0;
+    let enemyCooldown = 0;
+    let t = 0;
+
+    const hud = document.getElementById('hud');
+    const msg = document.getElementById('msg');
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+    function setMsg(text){ msg.textContent = text; }
+
+    addEventListener('keydown', e => {
+      keys[e.code] = true;
+      if (e.code === 'Space') fire();
+      if (e.code === 'KeyE') dockOrTrade();
+    });
+    addEventListener('keyup', e => keys[e.code] = false);
+
+    renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+    document.addEventListener('pointerlockchange', () => pointerLocked = document.pointerLockElement === renderer.domElement);
+    document.addEventListener('mousemove', e => {
+      if (!pointerLocked) return;
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y -= e.movementX * 0.0018;
+      camera.rotation.x -= e.movementY * 0.0018;
+      camera.rotation.x = clamp(camera.rotation.x, -1.4, 1.4);
+    });
+
+    function fire() {
+      if (cooldown > 0 || hp <= 0) return;
+      cooldown = 0.13;
+      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).normalize();
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.8, 6, 6), new THREE.MeshBasicMaterial({ color: 0x66ffff }));
+      b.position.copy(camera.position).add(dir.clone().multiplyScalar(5));
+      b.userData.vel = dir.multiplyScalar(620);
+      b.userData.life = 2.2;
+      scene.add(b);
+      bullets.push(b);
+    }
+
+    function enemyFire() {
+      if (enemyHp <= 0) return;
+      const toPlayer = camera.position.clone().sub(enemy.position).normalize();
+      const b = new THREE.Mesh(new THREE.SphereGeometry(1.0, 6, 6), new THREE.MeshBasicMaterial({ color: 0xff6655 }));
+      b.position.copy(enemy.position);
+      b.userData.vel = toPlayer.multiplyScalar(180);
+      b.userData.life = 5;
+      scene.add(b);
+      enemyBullets.push(b);
+    }
+
+    function dockOrTrade() {
+      const dist = camera.position.distanceTo(station.position);
+      const facing = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).dot(station.position.clone().sub(camera.position).normalize());
+      if (dist < 75 && facing > 0.86 && velocity.length() < 24) {
+        const buy = Math.min(3, Math.floor(cash / 40));
+        cash -= buy * 40;
+        cargo += buy;
+        const sold = cargo;
+        cash += sold * 55;
+        cargo = 0;
+        fuel = Math.min(100, fuel + 18);
+        hp = Math.min(100, hp + 15);
+        setMsg(`Docked: bought+sold goods. +$${sold*15} margin. Fuel/HP serviced.`);
+      } else {
+        setMsg('Docking failed: get closer, face station center, slow down.');
+      }
+    }
+
+    function stepBullets(arr, dt, hitFn) {
+      for (let i=arr.length-1;i>=0;i--) {
+        const b = arr[i];
+        b.position.addScaledVector(b.userData.vel, dt);
+        b.userData.life -= dt;
+        if (hitFn(b) || b.userData.life <= 0) {
+          scene.remove(b);
+          arr.splice(i,1);
+        }
+      }
+    }
+
+    function animate(ts) {
+      const dt = Math.min(0.033, (ts - t) / 1000 || 0.016);
+      t = ts;
+
+      station.rotation.x += dt * 0.4;
+      station.rotation.z += dt * 0.12;
+      stationCore.rotation.x += dt * 1.4;
+
+      cooldown = Math.max(0, cooldown - dt);
+      enemyCooldown -= dt;
+
+      const thrust = (keys['ShiftLeft'] || keys['ShiftRight']) ? 55 : 28;
+      const local = new THREE.Vector3(
+        (keys['KeyA']? -1:0) + (keys['KeyD']? 1:0),
+        (keys['KeyR']? 1:0) + (keys['KeyF']? -1:0),
+        (keys['KeyW']? -1:0) + (keys['KeyS']? 1:0)
+      );
+      if (local.lengthSq() > 0 && fuel > 0 && hp > 0) {
+        local.normalize().multiplyScalar(thrust * dt);
+        local.applyQuaternion(camera.quaternion);
+        velocity.add(local);
+        fuel = Math.max(0, fuel - dt * (thrust > 28 ? 4.2 : 1.7));
+      }
+
+      velocity.multiplyScalar(0.994);
+      camera.position.addScaledVector(velocity, dt * 14);
+
+      // Enemy AI simple orbit + attack
+      if (enemyHp > 0) {
+        const orbitCenter = new THREE.Vector3(-40, 0, -700);
+        enemy.position.x = orbitCenter.x + Math.cos(ts*0.0004) * 180;
+        enemy.position.y = orbitCenter.y + Math.sin(ts*0.0007) * 42;
+        enemy.position.z = orbitCenter.z + Math.sin(ts*0.0004) * 75;
+        enemy.lookAt(camera.position);
+
+        const enemyDist = enemy.position.distanceTo(camera.position);
+        if (enemyDist < 620 && enemyCooldown <= 0) {
+          enemyCooldown = 0.55;
+          enemyFire();
+        }
+      }
+
+      stepBullets(bullets, dt, (b) => {
+        if (enemyHp > 0 && b.position.distanceTo(enemy.position) < 12) {
+          enemyHp -= 14;
+          if (enemyHp <= 0) {
+            cash += 180;
+            setMsg('Enemy destroyed! +$180 bounty.');
+          }
+          return true;
+        }
+        return false;
+      });
+
+      stepBullets(enemyBullets, dt, (b) => {
+        if (b.position.distanceTo(camera.position) < 6) {
+          hp -= 10;
+          if (hp <= 0) {
+            hp = 0;
+            setMsg('Ship destroyed. Reload to retry.');
+          }
+          return true;
+        }
+        return false;
+      });
+
+      if (keys['KeyQ']) camera.rotation.z += dt * 0.9;
+      if (keys['KeyE']) camera.rotation.z -= dt * 0.9;
+
+      const speed = velocity.length() * 14;
+      const distStation = camera.position.distanceTo(station.position);
+      hud.innerHTML = [
+        `ELITE-LITE PROTOTYPE`,
+        `Cash: $${cash.toFixed(0)} | Fuel: ${fuel.toFixed(0)} | Hull: ${hp.toFixed(0)}% | Cargo: ${cargo}`,
+        `Speed: ${speed.toFixed(1)} u/s | Dist to Station: ${distStation.toFixed(1)}m`,
+        `Enemy: ${enemyHp > 0 ? enemyHp.toFixed(0)+'%' : 'DESTROYED'}`,
+        `Controls: WASD move, R/F up/down, Shift boost, Space fire, E dock/trade`
+      ].join('<br>');
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
