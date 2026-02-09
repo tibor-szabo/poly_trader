@@ -25,6 +25,7 @@ _RTDS_BTC = None
 _ALT_REFS_CACHE = []
 _ALT_REFS_TS = 0.0
 _BTC_TARGET_CACHE = {}
+_BTC_TARGET_MISS_LAST = {}
 _BTC_PRICE_CACHE = {}
 _BTC_CURRENT_CACHE = {"ts": 0.0, "price": None}
 _BTC_PRICE_CACHE_TTL_OK = 120.0
@@ -775,12 +776,17 @@ def run_once(cfg: dict):
         r["btc_price_source"] = src or "https://data.chain.link/streams/btc-usd"
         r["btc_target"] = round(target_px, 2) if target_px is not None else None
         if target_px is None:
-            append_event(cfg["storage"]["events_path"], {
-                "type": "btc_target_missing",
-                "market_id": r.get("market_id"),
-                "event_start_time": st,
-                "end_date": ed,
-            })
+            now_ts = datetime.now(timezone.utc).timestamp()
+            prev_ts = float(_BTC_TARGET_MISS_LAST.get(mid) or 0.0)
+            # Throttle noisy repeats while keeping visibility for real missing-target episodes.
+            if now_ts - prev_ts >= 300.0:
+                append_event(cfg["storage"]["events_path"], {
+                    "type": "btc_target_missing",
+                    "market_id": r.get("market_id"),
+                    "event_start_time": st,
+                    "end_date": ed,
+                })
+                _BTC_TARGET_MISS_LAST[mid] = now_ts
         r["btc_current"] = round(current_px, 2) if current_px is not None else None
         r["btc_current_binance"] = round(binance_live, 2) if binance_live is not None else None
         r["btc_target_start"] = st
