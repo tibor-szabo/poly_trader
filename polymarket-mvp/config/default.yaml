@@ -45,12 +45,13 @@ risk:
   max_open_markets: 5
 
 paper:
-  starting_cash_usd: 1000
+  starting_cash_usd: 100
   simulated_latency_ms: 300
 
 strategy:
-  impulse_source: "bybit"  # binance|coinbase|kraken|bybit
+  impulse_source: "binance"  # binance|coinbase|kraken|bybit
   trade_cap_usd: 100
+  max_trade_cash_fraction: 0.10
   max_open_positions: 2
   base_reentry_cooldown_s: 210
   flip_reentry_cooldown_s: 540

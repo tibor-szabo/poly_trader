@@ -989,6 +989,7 @@ def run_once(cfg: dict):
     # Model-driven BTC paper trading simulation.
     strategy_cfg = cfg.get("strategy", {})
     trade_cap = float(strategy_cfg.get("trade_cap_usd", 100.0))
+    max_trade_cash_fraction = float(strategy_cfg.get("max_trade_cash_fraction", 0.10))
     max_open_positions = int(strategy_cfg.get("max_open_positions", 2))
     base_reentry_cooldown_s = float(strategy_cfg.get("base_reentry_cooldown_s", 120.0))
     flip_reentry_cooldown_s = float(strategy_cfg.get("flip_reentry_cooldown_s", 240.0))
@@ -1141,7 +1142,9 @@ def run_once(cfg: dict):
             size_mul = max(0.5, min(1.0, 0.5 + (conf / 100.0) * 0.6))
             if scalp_open_ok:
                 size_mul = min(size_mul, 0.65)
-            size_usd = min(trade_cap * size_mul, float(state.cash_usd))
+            cash_now = float(state.cash_usd)
+            per_trade_cash_cap = max(1.0, cash_now * max_trade_cash_fraction)
+            size_usd = min(trade_cap * size_mul, per_trade_cash_cap, cash_now)
             model_tag = (f"SCALP:{impulse.get('source','src')}:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
             if entry > 0 and size_usd >= 1.0:
                 pos = open_position(
