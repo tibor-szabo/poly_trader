@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Milk Tapper</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🥛 Milk Tapper</h1>
+      <p class="sub">Retro lane game — serve milk to thirsty kids!</p>
+    </header>
+
+    <div class="hud">
+      <span id="score">Score: 0</span>
+      <span id="lives">Lives: 3</span>
+      <span id="level">Level: 1</span>
+    </div>
+
+    <canvas id="game" width="900" height="540" aria-label="Milk Tapper game"></canvas>
+
+    <div class="controls">
+      <p><b>Desktop:</b> ↑/↓ move bartender, <b>Space</b> serve milk</p>
+      <p><b>Mobile:</b> Tap upper/lower half to move, tap <b>SERVE</b></p>
+      <button id="serveBtn">SERVE 🥛</button>
+      <button id="startBtn">START / RESTART</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
