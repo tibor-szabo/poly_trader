@@ -58,11 +58,15 @@ strategy:
   min_hold_for_flip_exit_s: 45
   flip_stop_loss_pct: -0.12
   buy_no_flip_stop_loss_pct: -0.10
+  buy_yes_conf_floor: 52
+  buy_yes_consensus_floor: 4
+  buy_yes_reentry_cooldown_mult: 1.20
   buy_no_conf_floor: 54
   buy_no_consensus_floor: 5
   buy_no_reentry_cooldown_mult: 1.45
   normal_open_min_winner_stability: 0.18
-  normal_open_max_opposing_impulse_bps: 3.0
+  normal_open_buy_yes_min_winner_stability: 0.30
+  normal_open_max_opposing_impulse_bps: 2.5
 
 storage:
   state_path: "data/state.json"

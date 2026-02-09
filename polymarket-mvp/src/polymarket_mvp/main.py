@@ -997,7 +997,11 @@ def run_once(cfg: dict):
     flip_stop_loss_pct = float(strategy_cfg.get("flip_stop_loss_pct", -0.12))
     buy_no_flip_stop_loss_pct = float(strategy_cfg.get("buy_no_flip_stop_loss_pct", -0.10))
     normal_open_min_winner_stability = float(strategy_cfg.get("normal_open_min_winner_stability", 0.12))
+    normal_open_buy_yes_min_winner_stability = float(strategy_cfg.get("normal_open_buy_yes_min_winner_stability", 0.30))
     normal_open_max_opposing_impulse_bps = float(strategy_cfg.get("normal_open_max_opposing_impulse_bps", 3.0))
+    buy_yes_conf_floor = int(strategy_cfg.get("buy_yes_conf_floor", 52))
+    buy_yes_consensus_floor = int(strategy_cfg.get("buy_yes_consensus_floor", 4))
+    buy_yes_reentry_cooldown_mult = float(strategy_cfg.get("buy_yes_reentry_cooldown_mult", 1.20))
     buy_no_conf_floor = int(strategy_cfg.get("buy_no_conf_floor", 52))
     buy_no_consensus_floor = int(strategy_cfg.get("buy_no_consensus_floor", 4))
     buy_no_reentry_cooldown_mult = float(strategy_cfg.get("buy_no_reentry_cooldown_mult", 1.35))
@@ -1082,7 +1086,9 @@ def run_once(cfg: dict):
         last_close_side = str(_LAST_CLOSE_SIDE.get(mid, "") or "")
         last_close_pnl = float(_LAST_CLOSE_PNL.get(mid, 0.0) or 0.0)
         reentry_cooldown_s = flip_reentry_cooldown_s if last_close_reason in {"edge_flip_wrong_way", "edge_decay_stop", "flip_stop"} else base_reentry_cooldown_s
-        if winner_side == "BUY_NO":
+        if winner_side == "BUY_YES":
+            reentry_cooldown_s *= buy_yes_reentry_cooldown_mult
+        elif winner_side == "BUY_NO":
             reentry_cooldown_s *= buy_no_reentry_cooldown_mult
         # Extra churn brake: after a losing close on the same side, wait longer before re-entering.
         if winner_side == last_close_side and last_close_pnl <= 0:
@@ -1113,8 +1119,8 @@ def run_once(cfg: dict):
 
         side_edge = edge_yes if open_side == "BUY_YES" else edge_no
 
-        conf_floor = buy_no_conf_floor if open_side == "BUY_NO" else 45
-        consensus_floor = buy_no_consensus_floor if open_side == "BUY_NO" else 3
+        conf_floor = buy_no_conf_floor if open_side == "BUY_NO" else buy_yes_conf_floor
+        consensus_floor = buy_no_consensus_floor if open_side == "BUY_NO" else buy_yes_consensus_floor
         if open_side == "BUY_NO" and last_close_side == "BUY_NO" and last_close_pnl <= 0 and (now_epoch - last_close_ts) < 1800:
             conf_floor += 4
             consensus_floor += 1
@@ -1124,7 +1130,8 @@ def run_once(cfg: dict):
 
         # Avoid late contrarian flips when winner side is already stable.
         late_contrarian_block = (t_left_s < 240) and (winner_stability >= 0.70) and (open_side != winner_side)
-        low_stability_block = winner_stability < normal_open_min_winner_stability
+        min_stability_floor = normal_open_buy_yes_min_winner_stability if open_side == "BUY_YES" else normal_open_min_winner_stability
+        low_stability_block = winner_stability < min_stability_floor
         impulse_against_open = (
             (open_side == "BUY_YES" and impulse_bps <= -abs(normal_open_max_opposing_impulse_bps))
             or (open_side == "BUY_NO" and impulse_bps >= abs(normal_open_max_opposing_impulse_bps))
