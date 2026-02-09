@@ -155,3 +155,11 @@ print(
 )
 if missing_ids:
     print("btc_target_missing_market_ids", ",".join(missing_ids[:5]))
+
+# Lightweight health signal for discovery coverage reliability.
+if btc_target_missing_1h >= 50:
+    print("btc_discovery_health", "DEGRADED", f"missing_per_hour={btc_target_missing_1h}")
+elif btc_target_missing_1h >= 20:
+    print("btc_discovery_health", "WATCH", f"missing_per_hour={btc_target_missing_1h}")
+else:
+    print("btc_discovery_health", "OK", f"missing_per_hour={btc_target_missing_1h}")
