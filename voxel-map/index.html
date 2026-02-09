@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voxel Map Prototype</title>
+  <style>
+    html,body{margin:0;height:100%;background:#0b0f1a;color:#e7f0ff;font-family:system-ui}
+    #ui{position:fixed;left:12px;top:12px;z-index:20;background:rgba(10,14,24,.82);border:1px solid #2b3b55;border-radius:10px;padding:10px;max-width:420px}
+    input,button{padding:8px 10px;border-radius:8px;border:1px solid #3a4f73;background:#121a2a;color:#e7f0ff}
+    input{width:250px}
+    button{cursor:pointer}
+    #status{font-size:12px;opacity:.9;margin-top:6px;white-space:pre-wrap}
+    #help{font-size:12px;opacity:.8;margin-top:6px}
+    canvas{display:block}
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div><b>Voxel Map (real-time)</b></div>
+    <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+      <input id="addr" placeholder="Address or place (e.g. Prague Old Town)" />
+      <button id="go">Convert</button>
+    </div>
+    <div id="status">Ready.</div>
+    <div id="help">WASD move · Mouse drag look · Wheel zoom · Shift faster</div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87b6ff);
+    const camera = new THREE.PerspectiveCamera(65, innerWidth/innerHeight, 0.1, 5000);
+    camera.position.set(0,120,180);
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(200,300,120); scene.add(sun);
+
+    const ground = new THREE.Mesh(new THREE.BoxGeometry(2000,4,2000), new THREE.MeshLambertMaterial({color:0x73a35b}));
+    ground.position.y=-2; scene.add(ground);
+
+    const group = new THREE.Group(); scene.add(group);
+    const statusEl = document.getElementById('status');
+    const addrEl = document.getElementById('addr');
+
+    function status(t){ statusEl.textContent=t; }
+    function clearGroup(){ while(group.children.length) group.remove(group.children[0]); }
+
+    function box(x,y,z,w,h,d,color){
+      const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshLambertMaterial({color}));
+      m.position.set(x,y+h/2,z); group.add(m);
+    }
+
+    async function geocode(q){
+      const url=`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
+      const r=await fetch(url,{headers:{'Accept':'application/json'}}); if(!r.ok) throw new Error('geocode failed');
+      const j=await r.json(); if(!j.length) throw new Error('address not found');
+      return {lat:+j[0].lat, lon:+j[0].lon, name:j[0].display_name};
+    }
+
+    async function fetchOSM(lat,lon){
+      const d=0.0045; // ~500m radius box
+      const s=lat-d,w=lon-d,n=lat+d,e=lon+d;
+      const q=`[out:json][timeout:20];(way["building"](${s},${w},${n},${e});way["highway"](${s},${w},${n},${e}););out body;>;out skel qt;`;
+      const r=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q});
+      if(!r.ok) throw new Error('overpass failed');
+      return r.json();
+    }
+
+    function buildVoxel(data, centerLat, centerLon){
+      clearGroup();
+      const nodes=new Map();
+      for(const el of data.elements) if(el.type==='node') nodes.set(el.id,el);
+
+      const metersPerDegLat=111320;
+      const metersPerDegLon=Math.cos(centerLat*Math.PI/180)*111320;
+      const scale=0.45; // meters->world units
+
+      // base roads
+      for(const el of data.elements){
+        if(el.type!=='way' || !el.tags || !el.tags.highway || !el.nodes) continue;
+        for(let i=0;i<el.nodes.length-1;i++){
+          const a=nodes.get(el.nodes[i]), b=nodes.get(el.nodes[i+1]); if(!a||!b) continue;
+          const ax=(a.lon-centerLon)*metersPerDegLon*scale, az=-(a.lat-centerLat)*metersPerDegLat*scale;
+          const bx=(b.lon-centerLon)*metersPerDegLon*scale, bz=-(b.lat-centerLat)*metersPerDegLat*scale;
+          const dx=bx-ax, dz=bz-az, len=Math.hypot(dx,dz);
+          const road=new THREE.Mesh(new THREE.BoxGeometry(Math.max(2,len),1.2,5), new THREE.MeshLambertMaterial({color:0x3a3a3f}));
+          road.position.set((ax+bx)/2,0.6,(az+bz)/2);
+          road.rotation.y=Math.atan2(dz,dx);
+          group.add(road);
+        }
+      }
+
+      // voxel buildings (simple bbox approximation)
+      let bCount=0;
+      for(const el of data.elements){
+        if(el.type!=='way' || !el.tags || !el.tags.building || !el.nodes || el.nodes.length<3) continue;
+        const pts=[];
+        for(const nid of el.nodes){ const n=nodes.get(nid); if(!n) continue;
+          pts.push({x:(n.lon-centerLon)*metersPerDegLon*scale, z:-(n.lat-centerLat)*metersPerDegLat*scale});
+        }
+        if(pts.length<3) continue;
+        let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+        for(const p of pts){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
+        const w=Math.max(4, maxX-minX), d=Math.max(4, maxZ-minZ);
+        const cx=(minX+maxX)/2, cz=(minZ+maxZ)/2;
+        let floors=2+Math.floor(Math.random()*8);
+        if(el.tags['building:levels']) floors=Math.min(18, Math.max(1, parseInt(el.tags['building:levels'])||floors));
+        const h=floors*3;
+        box(cx,0,cz,w,h,d,0xb7c6d9);
+        // windows voxels
+        for(let y=2;y<h-2;y+=4){
+          box(cx-w/2+1.1,y,cz,d*0.0+0.01,1.2,d*0.85,0x90a8c2);
+          box(cx+w/2-1.1,y,cz,d*0.0+0.01,1.2,d*0.85,0x90a8c2);
+        }
+        bCount++;
+      }
+
+      // center marker
+      box(0,0,0,3,2,3,0xffd166);
+      return bCount;
+    }
+
+    async function convert(){
+      const q=addrEl.value.trim(); if(!q) return;
+      try{
+        status('Geocoding address...');
+        const g=await geocode(q);
+        status('Fetching map geometry...');
+        const data=await fetchOSM(g.lat,g.lon);
+        status('Voxelizing in real-time...');
+        const count=buildVoxel(data,g.lat,g.lon);
+        status(`Done: ${count} buildings\n${g.name}`);
+      }catch(e){
+        status('Error: '+e.message);
+      }
+    }
+
+    document.getElementById('go').addEventListener('click', convert);
+    addrEl.addEventListener('keydown', e=>{ if(e.key==='Enter') convert(); });
+    addrEl.value='Prague Old Town';
+
+    // basic fly controls
+    const keys={}; let dragging=false; let yaw=0,pitch=-0.35;
+    addEventListener('keydown',e=>keys[e.code]=true); addEventListener('keyup',e=>keys[e.code]=false);
+    renderer.domElement.addEventListener('mousedown',()=>dragging=true);
+    addEventListener('mouseup',()=>dragging=false);
+    addEventListener('mousemove',e=>{ if(!dragging) return; yaw-=e.movementX*0.003; pitch-=e.movementY*0.003; pitch=Math.max(-1.4,Math.min(1.4,pitch)); });
+    addEventListener('wheel',e=>camera.fov=Math.max(35,Math.min(90,camera.fov+e.deltaY*0.02))||camera.fov);
+
+    function loop(){
+      camera.fov=camera.fov; camera.updateProjectionMatrix();
+      camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
+      const speed=(keys.ShiftLeft?2.4:1.1);
+      const fwd=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); fwd.y=0; fwd.normalize();
+      const right=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); right.y=0; right.normalize();
+      if(keys.KeyW) camera.position.addScaledVector(fwd, speed);
+      if(keys.KeyS) camera.position.addScaledVector(fwd,-speed);
+      if(keys.KeyA) camera.position.addScaledVector(right,-speed);
+      if(keys.KeyD) camera.position.addScaledVector(right, speed);
+      if(keys.KeyR) camera.position.y+=speed;
+      if(keys.KeyF) camera.position.y-=speed;
+      camera.position.y=Math.max(12,camera.position.y);
+      renderer.render(scene,camera);
+      requestAnimationFrame(loop);
+    }
+    addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
