@@ -10,7 +10,7 @@ data:
   use_clob_ws: true
   stale_seconds: 30
   max_markets: 30
-  btc_group_size: 12
+  btc_group_size: 8
   alt_group_size: 10
   alt_group_refresh_seconds: 300
   alt_group_horizon_days: 30
@@ -38,6 +38,9 @@ scoring:
 
 execution:
   max_exec_sum: 1.02
+
+strategy:
+  impulse_source: "coinbase"  # binance|coinbase|kraken|bybit
 
 risk:
   max_notional_per_market_usd: 100
