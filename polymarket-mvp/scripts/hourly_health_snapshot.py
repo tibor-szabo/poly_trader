@@ -182,3 +182,11 @@ else:
 
 burst = "BURST" if btc_target_missing_5m >= 5 else "STABLE"
 print("btc_discovery_burst", burst, f"missing_5m={btc_target_missing_5m}")
+
+if btc_target_missing_15m >= 8:
+    health_15m = "HOT"
+elif btc_target_missing_15m >= 4:
+    health_15m = "ELEVATED"
+else:
+    health_15m = "OK"
+print("btc_discovery_health_15m", health_15m, f"missing_15m={btc_target_missing_15m}")
