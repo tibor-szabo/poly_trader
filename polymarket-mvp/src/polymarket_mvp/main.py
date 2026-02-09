@@ -1033,15 +1033,17 @@ def run_once(cfg: dict):
         reentry_cooldown_s = flip_reentry_cooldown_s if last_close_reason in {"edge_flip_wrong_way", "edge_decay_stop", "flip_stop"} else base_reentry_cooldown_s
         if winner_side == "BUY_NO":
             reentry_cooldown_s *= buy_no_reentry_cooldown_mult
-        # Extra churn brake: after a losing BUY_NO close on this market, wait longer
-        # before opening another BUY_NO to avoid rapid wrong-way flip loops.
-        if winner_side == "BUY_NO" and last_close_side == "BUY_NO" and last_close_pnl <= 0:
+        # Extra churn brake: after a losing close on the same side, wait longer before re-entering.
+        if winner_side == last_close_side and last_close_pnl <= 0:
             reentry_cooldown_s *= 1.35
+        # Hard-stop losses are expensive; cool down that side materially longer.
+        if last_close_reason == "hard_stop_25" and winner_side == last_close_side:
+            reentry_cooldown_s = max(reentry_cooldown_s, 600.0)
         lock_until = float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)
         lock_ok = now_epoch >= lock_until
         cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok
         open_side = winner_side
-        required_edge = 0.03 if winner_side == "BUY_YES" else 0.04
+        required_edge = 0.04 if winner_side == "BUY_YES" else 0.04
         if p_hit > 0.65 and winner_stability >= 0.7:
             required_edge *= 0.85
         if reversal_belief:
@@ -1068,7 +1070,7 @@ def run_once(cfg: dict):
         impulse_side = impulse.get("side")
         impulse_bps = float(impulse.get("bps_3s") or 0.0)
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 7.0 and impulse_edge >= 0.015 and len(open_map) < max_open_positions and cool_ok
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 9.0 and impulse_edge >= 0.02 and len(open_map) < max_open_positions and cool_ok
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
