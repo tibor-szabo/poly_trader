@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from datetime import datetime
 from pathlib import Path
 
 EVENTS = Path(__file__).resolve().parents[1] / "data" / "events.jsonl"
 WINDOW_S = 3600
+RECENT_LINES = 300_000
 
 
 def to_epoch(v):
@@ -20,28 +22,55 @@ def to_epoch(v):
     return None
 
 
+def parse_args():
+    p = argparse.ArgumentParser(description="Summarize recent paper trading performance from events.jsonl")
+    p.add_argument("--window-hours", type=float, default=1.0, help="Lookback window in hours (default: 1)")
+    p.add_argument("--events", type=Path, default=EVENTS, help="Path to events.jsonl")
+    p.add_argument(
+        "--recent-lines",
+        type=int,
+        default=RECENT_LINES,
+        help="Only parse last N lines for speed (default: 300000, use 0 for full file)",
+    )
+    return p.parse_args()
+
+
+def iter_recent_lines(path: Path, recent_lines: int):
+    if recent_lines <= 0:
+        with path.open() as f:
+            yield from f
+        return
+    q = deque(maxlen=recent_lines)
+    with path.open() as f:
+        for line in f:
+            q.append(line)
+    for line in q:
+        yield line
+
+
 def main():
+    args = parse_args()
     now = time.time()
-    cut = now - WINDOW_S
+    window_s = max(60.0, float(args.window_hours) * 3600.0)
+    cut = now - window_s
     opens, closes, guards = [], [], []
 
-    with EVENTS.open() as f:
-        for line in f:
-            try:
-                e = json.loads(line)
-            except Exception:
-                continue
-            t = to_epoch(e.get("ts"))
-            if not t or t < cut:
-                continue
-            typ = e.get("type")
-            if typ == "paper_trade":
-                if e.get("action") == "OPEN":
-                    opens.append(e)
-                elif "CLOSE" in str(e.get("action") or ""):
-                    closes.append(e)
-            elif typ == "market_guardrail":
-                guards.append(e)
+    for line in iter_recent_lines(args.events, args.recent_lines):
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        t = to_epoch(e.get("ts"))
+        if not t or t < cut:
+            continue
+        typ = e.get("type")
+        if typ == "paper_trade":
+            if e.get("action") == "OPEN":
+                opens.append(e)
+            elif "CLOSE" in str(e.get("action") or ""):
+                closes.append(e)
+        elif typ == "market_guardrail":
+            guards.append(e)
 
     pnl = sum(float(e.get("pnl_usd") or 0.0) for e in closes)
     wins = sum(1 for e in closes if float(e.get("pnl_usd") or 0.0) > 0)
@@ -105,7 +134,7 @@ def main():
     avg_hold = (sum(hold_s) / len(hold_s)) if hold_s else 0.0
 
     out = {
-        "window_minutes": 60,
+        "window_minutes": round(window_s / 60.0, 2),
         "counts": {"opens": len(opens), "closes": len(closes)},
         "pnl_usd": round(pnl, 4),
         "winrate_pct": round(winrate, 2),
