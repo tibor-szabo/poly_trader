@@ -49,14 +49,16 @@ paper:
   simulated_latency_ms: 300
 
 strategy:
-  impulse_source: "binance"  # binance|coinbase|kraken|bybit
+  impulse_source: "coinbase"  # binance|coinbase|kraken|bybit
   trade_cap_usd: 100
   max_open_positions: 2
   base_reentry_cooldown_s: 210
   flip_reentry_cooldown_s: 540
   min_hold_for_flip_exit_s: 45
-  buy_no_conf_floor: 52
-  buy_no_consensus_floor: 4
+  flip_stop_loss_pct: -0.12
+  buy_no_flip_stop_loss_pct: -0.10
+  buy_no_conf_floor: 54
+  buy_no_consensus_floor: 5
   buy_no_reentry_cooldown_mult: 1.45
 
 storage:
