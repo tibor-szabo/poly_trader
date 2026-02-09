@@ -40,6 +40,8 @@ _MODEL_STATS = {
 }
 _LAST_CLOSE_TS = {}
 _LAST_CLOSE_REASON = {}
+_LAST_CLOSE_SIDE = {}
+_LAST_CLOSE_PNL = {}
 _EDGE_HIST = {}
 _WINNER_HIST = {}
 _FLIP_FAIL_STREAK = {}
@@ -1015,15 +1017,26 @@ def run_once(cfg: dict):
             "open_positions": len(open_map),
             "flip_fail_streak": int(_FLIP_FAIL_STREAK.get(mid, 0) or 0),
             "market_locked": bool(datetime.now(timezone.utc).timestamp() < float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)),
+            "recent_losing_buy_no": bool(
+                str(_LAST_CLOSE_SIDE.get(mid, "") or "") == "BUY_NO"
+                and float(_LAST_CLOSE_PNL.get(mid, 0.0) or 0.0) <= 0
+                and (datetime.now(timezone.utc).timestamp() - float(_LAST_CLOSE_TS.get(mid, 0.0) or 0.0)) < 1800
+            ),
         })
 
         # Open rule v3: trend-follow by default with persistence filter; reversal is rare.
         now_epoch = datetime.now(timezone.utc).timestamp()
         last_close_ts = float(_LAST_CLOSE_TS.get(mid, 0.0))
         last_close_reason = str(_LAST_CLOSE_REASON.get(mid, "") or "")
+        last_close_side = str(_LAST_CLOSE_SIDE.get(mid, "") or "")
+        last_close_pnl = float(_LAST_CLOSE_PNL.get(mid, 0.0) or 0.0)
         reentry_cooldown_s = flip_reentry_cooldown_s if last_close_reason in {"edge_flip_wrong_way", "edge_decay_stop", "flip_stop"} else base_reentry_cooldown_s
         if winner_side == "BUY_NO":
             reentry_cooldown_s *= buy_no_reentry_cooldown_mult
+        # Extra churn brake: after a losing BUY_NO close on this market, wait longer
+        # before opening another BUY_NO to avoid rapid wrong-way flip loops.
+        if winner_side == "BUY_NO" and last_close_side == "BUY_NO" and last_close_pnl <= 0:
+            reentry_cooldown_s *= 1.35
         lock_until = float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)
         lock_ok = now_epoch >= lock_until
         cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok
@@ -1046,6 +1059,9 @@ def run_once(cfg: dict):
 
         conf_floor = buy_no_conf_floor if open_side == "BUY_NO" else 45
         consensus_floor = buy_no_consensus_floor if open_side == "BUY_NO" else 3
+        if open_side == "BUY_NO" and last_close_side == "BUY_NO" and last_close_pnl <= 0 and (now_epoch - last_close_ts) < 1800:
+            conf_floor += 4
+            consensus_floor += 1
         normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok
 
         # Fast Binance impulse scalp: take movement direction, then exit quickly when edge decays.
@@ -1174,6 +1190,8 @@ def run_once(cfg: dict):
                     pnl = close_position(state, open_pos, exit_price)
                     _LAST_CLOSE_TS[mid] = datetime.now(timezone.utc).timestamp()
                     _LAST_CLOSE_REASON[mid] = close_reason
+                    _LAST_CLOSE_SIDE[mid] = str(open_pos.side or "")
+                    _LAST_CLOSE_PNL[mid] = float(pnl)
                 else:
                     pnl = close_fraction(state, open_pos, exit_price, close_frac)
                     open_pos.pnl_usd = float((open_pos.pnl_usd or 0.0) + pnl)

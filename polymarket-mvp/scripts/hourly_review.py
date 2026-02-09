@@ -52,6 +52,13 @@ def main():
     by_model = Counter((e.get("model_open") or e.get("model") or "-") for e in closes)
     close_reasons = Counter((e.get("reason") or "-") for e in closes)
 
+    side_pnl = defaultdict(float)
+    model_pnl = defaultdict(float)
+    for e in closes:
+        v = float(e.get("pnl_usd") or 0.0)
+        side_pnl[(e.get("side") or "-")] += v
+        model_pnl[(e.get("model_open") or e.get("model") or "-")] += v
+
     # Re-entry / churn: open after close on same market within 10 minutes.
     closes_by_market = defaultdict(list)
     for e in closes:
@@ -93,7 +100,9 @@ def main():
         "wins": wins,
         "losses": losses,
         "by_side": dict(by_side),
+        "by_side_pnl": {k: round(v, 4) for k, v in side_pnl.items()},
         "by_model": dict(by_model),
+        "by_model_pnl": {k: round(v, 4) for k, v in model_pnl.items()},
         "close_reasons": dict(close_reasons),
         "churn": {
             "reentries_10m": reentries,
