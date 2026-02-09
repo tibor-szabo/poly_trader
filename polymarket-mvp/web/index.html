@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8' />
+  <meta name='viewport' content='width=device-width, initial-scale=1' />
+  <title>Polymarket MVP</title>
+  <link rel='stylesheet' href='/styles.css' />
+</head>
+<body>
+  <div class='card'>
+    <h3 style='margin:0 0 12px 0;'>API Monitor</h3>
+    <div class='grid'>
+      <div><div class='k'>Server time</div><div class='v' id='serverTime'>-</div></div>
+      <div><div class='k'>Latest data</div><div class='v' id='latestData'>-</div></div>
+      <div><div class='k'>Latest WS tick</div><div class='v' id='latestWs'>-</div></div>
+      <div><div class='k'>Calls total</div><div class='v' id='callsTotal'>0</div></div>
+      <div><div class='k'>Calls last hour</div><div class='v' id='callsHour'>0</div></div>
+      <div><div class='k'>Calls last day</div><div class='v' id='callsDay'>0</div></div>
+      <div class='api-link'><div class='k'>API Link</div><div class='v' id='apiLink'>-</div></div>
+    </div>
+    <div style='margin-top:10px' class='k'>Cash: <span id='cash'></span> | Positions: <span id='positions'></span> | Realized PnL: <span id='pnl'></span></div>
+  </div>
+
+  <div class='card'>
+    <h3 style='margin:0 0 12px 0;'>Bitcoin Group (primary)</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Market</th>
+          <th>Target BTC</th>
+          <th>BTC now (Chainlink)</th>
+          <th>BTC now (Binance)</th>
+          <th>TA Y/N</th>
+          <th>LeadLag Y/N</th>
+          <th>Regime Y/N</th>
+          <th>Book Y/N</th>
+          <th>P(close&gt;target)</th>
+          <th>P(hit target)</th>
+          <th>Best Model</th>
+          <th>Best Ask YES</th>
+          <th>Best Ask NO</th>
+          <th>Sum (no fees)</th>
+          <th>Sum (with fees)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id='rows'></tbody>
+    </table>
+  </div>
+
+  <div class='card'>
+    <h3 style='margin:0 0 12px 0;'>Secondary Group (&lt; 7d to resolution)</h3>
+    <div class='k' id='secondaryMeta'>Auto-selected by liquidity + spread quality.</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Market</th>
+          <th>Best Ask YES</th>
+          <th>Best Ask NO</th>
+          <th>Sum (no fees)</th>
+          <th>Sum (with fees)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id='rows2'></tbody>
+    </table>
+  </div>
+
+  <div class='card'>
+    <h3 style='margin:0 0 12px 0;'>Positions Log (paper simulation)</h3>
+    <div class='k' id='oppMeta'>No positions yet.</div>
+    <div class='k' id='edgeQaMeta' style='margin-top:6px'></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Server time opened</th>
+          <th>Market</th>
+          <th>Status</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Notional ($)</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>Model open</th>
+          <th>Model close</th>
+          <th>PnL ($)</th>
+        </tr>
+      </thead>
+      <tbody id='oppRows'></tbody>
+    </table>
+  </div>
+
+  <script src='/app.js'></script>
+</body>
+</html>

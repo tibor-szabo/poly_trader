@@ -1,0 +1,13 @@
+body { font-family: Inter, Arial, sans-serif; margin: 18px; background:#0f1115; color:#e8eaed; }
+.card { border:1px solid #2a2f3a; border-radius:12px; padding:14px; margin-bottom:14px; background:#151922; }
+.grid { display:grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap:10px; align-items:end; }
+.api-link { grid-column: 7 / 8; text-align:right; overflow:hidden; }
+.api-link .v { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+.k { color:#9aa4b2; font-size:12px; }
+.v { font-size:16px; font-weight:700; }
+table { width:100%; border-collapse:collapse; }
+th, td { border-bottom:1px solid #2a2f3a; padding:8px; font-size:12px; text-align:left; }
+.ok { color:#55d38a; font-weight:700; }
+.no { color:#ff6b6b; font-weight:700; }
+.watch { color:#ffd166; font-weight:700; }
+.changed { color:#55d38a; font-weight:700; transition: color 0.25s ease; }
