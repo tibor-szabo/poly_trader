@@ -42,6 +42,9 @@ btc_target_missing_5m = 0
 btc_target_missing_markets_1h = set()
 btc_target_missing_market_counter_1h = Counter()
 last_btc_target_missing_ts = None
+loop_errors_1h = 0
+adapter_errors_1h = 0
+guardrails_1h = 0
 now = time.time()
 
 if EVENTS.exists():
@@ -56,7 +59,17 @@ if EVENTS.exists():
         except Exception:
             continue
 
+        ts = to_epoch(e.get("ts"))
         t = e.get("type")
+
+        if ts and now - ts <= 3600:
+            if t == "loop_error":
+                loop_errors_1h += 1
+            elif t == "adapter_error":
+                adapter_errors_1h += 1
+            elif t == "market_guardrail":
+                guardrails_1h += 1
+
         if t in {
             "market_scan",
             "inefficiency_report",
@@ -181,6 +194,13 @@ if last_btc_target_missing_ts is not None:
     age = round((now - last_btc_target_missing_ts) / 60.0, 1)
     ts_iso = datetime.fromtimestamp(last_btc_target_missing_ts, timezone.utc).isoformat()
     print("btc_target_missing_last_seen", ts_iso, f"age_min={age}")
+
+print(
+    "error_summary_1h",
+    f"loop_error={loop_errors_1h}",
+    f"adapter_error={adapter_errors_1h}",
+    f"market_guardrail={guardrails_1h}",
+)
 
 # Lightweight health signal for discovery coverage reliability.
 if btc_target_missing_1h >= 50:
