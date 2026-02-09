@@ -37,6 +37,7 @@ def age_minutes(ts):
 last = {}
 btc_target_missing_1h = 0
 btc_target_missing_markets_1h = set()
+last_btc_target_missing_ts = None
 now = time.time()
 
 if EVENTS.exists():
@@ -64,11 +65,14 @@ if EVENTS.exists():
 
         if t == "btc_target_missing":
             ts = to_epoch(e.get("ts"))
-            if ts and now - ts <= 3600:
-                btc_target_missing_1h += 1
-                mid = str(e.get("market_id") or "")
-                if mid:
-                    btc_target_missing_markets_1h.add(mid)
+            if ts:
+                if (last_btc_target_missing_ts is None) or ts > last_btc_target_missing_ts:
+                    last_btc_target_missing_ts = ts
+                if now - ts <= 3600:
+                    btc_target_missing_1h += 1
+                    mid = str(e.get("market_id") or "")
+                    if mid:
+                        btc_target_missing_markets_1h.add(mid)
 
 loop_n = ps_count(r"polymarket_mvp\.loop")
 dash_n = ps_count(r"polymarket_mvp\.dashboard")
@@ -155,6 +159,10 @@ print(
 )
 if missing_ids:
     print("btc_target_missing_market_ids", ",".join(missing_ids[:5]))
+if last_btc_target_missing_ts is not None:
+    age = round((now - last_btc_target_missing_ts) / 60.0, 1)
+    ts_iso = datetime.fromtimestamp(last_btc_target_missing_ts, timezone.utc).isoformat()
+    print("btc_target_missing_last_seen", ts_iso, f"age_min={age}")
 
 # Lightweight health signal for discovery coverage reliability.
 if btc_target_missing_1h >= 50:
