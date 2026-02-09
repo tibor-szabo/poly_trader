@@ -36,6 +36,8 @@ def age_minutes(ts):
 
 last = {}
 btc_target_missing_1h = 0
+btc_target_missing_15m = 0
+btc_target_missing_5m = 0
 btc_target_missing_markets_1h = set()
 last_btc_target_missing_ts = None
 now = time.time()
@@ -70,6 +72,10 @@ if EVENTS.exists():
                     last_btc_target_missing_ts = ts
                 if now - ts <= 3600:
                     btc_target_missing_1h += 1
+                    if now - ts <= 900:
+                        btc_target_missing_15m += 1
+                    if now - ts <= 300:
+                        btc_target_missing_5m += 1
                     mid = str(e.get("market_id") or "")
                     if mid:
                         btc_target_missing_markets_1h.add(mid)
@@ -155,6 +161,8 @@ if snap:
 missing_ids = sorted(btc_target_missing_markets_1h)
 print(
     f"btc_target_missing_1h={btc_target_missing_1h}"
+    f" btc_target_missing_15m={btc_target_missing_15m}"
+    f" btc_target_missing_5m={btc_target_missing_5m}"
     f" unique_markets={len(missing_ids)}"
 )
 if missing_ids:
@@ -171,3 +179,6 @@ elif btc_target_missing_1h >= 20:
     print("btc_discovery_health", "WATCH", f"missing_per_hour={btc_target_missing_1h}")
 else:
     print("btc_discovery_health", "OK", f"missing_per_hour={btc_target_missing_1h}")
+
+burst = "BURST" if btc_target_missing_5m >= 5 else "STABLE"
+print("btc_discovery_burst", burst, f"missing_5m={btc_target_missing_5m}")
