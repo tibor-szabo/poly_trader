@@ -6,6 +6,7 @@ on:
     paths:
       - 'milk-tapper/**'
       - 'elite-lite/**'
+      - 'voxel-map/**'
       - '.github/workflows/deploy-milk-tapper.yml'
   workflow_dispatch:
 
@@ -36,10 +37,11 @@ jobs:
           mkdir -p site
           cp -R milk-tapper site/milk-tapper
           cp -R elite-lite site/elite-lite
+          cp -R voxel-map site/voxel-map
           cat > site/index.html <<'HTML'
           <!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Jarvis Game Lab</title>
           <style>body{font-family:system-ui;background:#0b1020;color:#e6f0ff;padding:24px}a{color:#7ee0ff;font-size:20px;display:block;margin:12px 0}</style></head>
-          <body><h1>🎮 Jarvis Game Lab</h1><a href='./milk-tapper/'>🥛 Milk Tapper</a><a href='./elite-lite/'>🚀 Elite Lite Prototype</a></body></html>
+          <body><h1>🎮 Jarvis Game Lab</h1><a href='./milk-tapper/'>🥛 Milk Tapper</a><a href='./elite-lite/'>🚀 Elite Lite Prototype</a><a href='./voxel-map/'>🧱 Voxel Map Prototype</a></body></html>
           HTML
 
       - name: Upload artifact
