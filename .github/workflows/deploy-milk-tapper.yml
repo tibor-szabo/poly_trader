@@ -1,10 +1,11 @@
-name: Deploy Milk Tapper to GitHub Pages
+name: Deploy Web Games to GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
       - 'milk-tapper/**'
+      - 'elite-lite/**'
       - '.github/workflows/deploy-milk-tapper.yml'
   workflow_dispatch:
 
@@ -30,10 +31,21 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - name: Build static site bundle
+        run: |
+          mkdir -p site
+          cp -R milk-tapper site/milk-tapper
+          cp -R elite-lite site/elite-lite
+          cat > site/index.html <<'HTML'
+          <!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Jarvis Game Lab</title>
+          <style>body{font-family:system-ui;background:#0b1020;color:#e6f0ff;padding:24px}a{color:#7ee0ff;font-size:20px;display:block;margin:12px 0}</style></head>
+          <body><h1>🎮 Jarvis Game Lab</h1><a href='./milk-tapper/'>🥛 Milk Tapper</a><a href='./elite-lite/'>🚀 Elite Lite Prototype</a></body></html>
+          HTML
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./milk-tapper
+          path: ./site
 
       - name: Deploy to GitHub Pages
         id: deployment
