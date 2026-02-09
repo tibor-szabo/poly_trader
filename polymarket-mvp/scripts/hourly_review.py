@@ -45,7 +45,8 @@ def main():
 
     pnl = sum(float(e.get("pnl_usd") or 0.0) for e in closes)
     wins = sum(1 for e in closes if float(e.get("pnl_usd") or 0.0) > 0)
-    losses = sum(1 for e in closes if float(e.get("pnl_usd") or 0.0) <= 0)
+    breakeven = sum(1 for e in closes if float(e.get("pnl_usd") or 0.0) == 0)
+    losses = sum(1 for e in closes if float(e.get("pnl_usd") or 0.0) < 0)
     winrate = (wins / len(closes) * 100.0) if closes else 0.0
 
     by_side = Counter((e.get("side") or "-") for e in closes)
@@ -54,10 +55,20 @@ def main():
 
     side_pnl = defaultdict(float)
     model_pnl = defaultdict(float)
+    reason_pnl = defaultdict(float)
+    model_wins = defaultdict(int)
+    model_trades = defaultdict(int)
     for e in closes:
         v = float(e.get("pnl_usd") or 0.0)
-        side_pnl[(e.get("side") or "-")] += v
-        model_pnl[(e.get("model_open") or e.get("model") or "-")] += v
+        side = (e.get("side") or "-")
+        model = (e.get("model_open") or e.get("model") or "-")
+        reason = (e.get("reason") or "-")
+        side_pnl[side] += v
+        model_pnl[model] += v
+        reason_pnl[reason] += v
+        model_trades[model] += 1
+        if v > 0:
+            model_wins[model] += 1
 
     # Re-entry / churn: open after close on same market within 10 minutes.
     closes_by_market = defaultdict(list)
@@ -71,6 +82,7 @@ def main():
     reentries = 0
     fast_reentries = 0
     hold_s = []
+    closes_per_market = Counter(str(e.get("market_id") or "") for e in closes if e.get("market_id") is not None)
     for e in opens:
         mid = str(e.get("market_id") or "")
         ot = to_epoch(e.get("opened_at") or e.get("ts"))
@@ -98,16 +110,25 @@ def main():
         "pnl_usd": round(pnl, 4),
         "winrate_pct": round(winrate, 2),
         "wins": wins,
+        "breakeven": breakeven,
         "losses": losses,
         "by_side": dict(by_side),
         "by_side_pnl": {k: round(v, 4) for k, v in side_pnl.items()},
         "by_model": dict(by_model),
         "by_model_pnl": {k: round(v, 4) for k, v in model_pnl.items()},
+        "by_model_winrate_pct": {
+            k: round((model_wins.get(k, 0) / max(1, n)) * 100.0, 2) for k, n in model_trades.items()
+        },
         "close_reasons": dict(close_reasons),
+        "close_reasons_pnl": {k: round(v, 4) for k, v in reason_pnl.items()},
         "churn": {
             "reentries_10m": reentries,
             "fast_reentries_3m": fast_reentries,
             "avg_hold_seconds": round(avg_hold, 2),
+            "markets_with_multiple_closes": sum(1 for _, n in closes_per_market.items() if n > 1),
+            "top_repeated_markets": [
+                {"market_id": k, "closes": n} for k, n in closes_per_market.most_common(3) if n > 1
+            ],
         },
         "guardrails_triggered": len(guards),
     }

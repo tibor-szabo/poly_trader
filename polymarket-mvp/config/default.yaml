@@ -10,7 +10,7 @@ data:
   use_clob_ws: true
   stale_seconds: 30
   max_markets: 30
-  btc_group_size: 8
+  btc_group_size: 6
   alt_group_size: 10
   alt_group_refresh_seconds: 300
   alt_group_horizon_days: 30
@@ -53,8 +53,8 @@ strategy:
   trade_cap_usd: 100
   max_open_positions: 2
   base_reentry_cooldown_s: 180
-  flip_reentry_cooldown_s: 420
-  min_hold_for_flip_exit_s: 35
+  flip_reentry_cooldown_s: 540
+  min_hold_for_flip_exit_s: 45
   buy_no_conf_floor: 52
   buy_no_consensus_floor: 4
   buy_no_reentry_cooldown_mult: 1.35
