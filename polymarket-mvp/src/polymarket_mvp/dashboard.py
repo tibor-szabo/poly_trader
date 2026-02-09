@@ -20,7 +20,22 @@ def read_state():
 def read_events(n=400):
     if not EVENTS.exists():
         return []
-    lines = EVENTS.read_text().strip().splitlines()[-n:]
+
+    # Efficient tail-read: avoid loading entire events.jsonl into memory on each request.
+    chunk_size = 64 * 1024
+    data = b""
+    with EVENTS.open("rb") as f:
+        f.seek(0, 2)
+        end = f.tell()
+        pos = end
+        needed_lines = n + 5
+        while pos > 0 and data.count(b"\n") < needed_lines:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            data = f.read(read_size) + data
+
+    lines = data.decode("utf-8", errors="ignore").splitlines()[-n:]
     out = []
     for ln in lines:
         try:
