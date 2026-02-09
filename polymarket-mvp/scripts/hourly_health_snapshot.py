@@ -102,6 +102,10 @@ loop_n = ps_count(r"polymarket_mvp\.loop")
 dash_n = ps_count(r"polymarket_mvp\.dashboard")
 
 print(f"loops={loop_n} dashboards={dash_n}")
+if loop_n == 1 and dash_n == 1:
+    print("process_topology", "OK", "expected=1/1")
+else:
+    print("process_topology", "WARN", f"expected=1/1 actual={loop_n}/{dash_n}")
 
 ms = last.get("market_scan", {})
 if ms:
