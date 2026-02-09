@@ -39,9 +39,6 @@ scoring:
 execution:
   max_exec_sum: 1.02
 
-strategy:
-  impulse_source: "coinbase"  # binance|coinbase|kraken|bybit
-
 risk:
   max_notional_per_market_usd: 100
   max_daily_loss_usd: 50
@@ -52,6 +49,7 @@ paper:
   simulated_latency_ms: 300
 
 strategy:
+  impulse_source: "coinbase"  # binance|coinbase|kraken|bybit
   trade_cap_usd: 100
   max_open_positions: 2
   base_reentry_cooldown_s: 180
