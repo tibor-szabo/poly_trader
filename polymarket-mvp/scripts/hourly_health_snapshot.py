@@ -190,6 +190,10 @@ if btc_target_missing_market_counter_1h:
     top_mid, top_cnt = btc_target_missing_market_counter_1h.most_common(1)[0]
     share = round((top_cnt / max(1, btc_target_missing_1h)) * 100.0, 1)
     print("btc_target_missing_hotspot", top_mid, f"count={top_cnt}", f"share_pct={share}")
+    top3 = ",".join(
+        f"{mid}:{cnt}" for mid, cnt in btc_target_missing_market_counter_1h.most_common(3)
+    )
+    print("btc_target_missing_hotspots_top3", top3)
 if last_btc_target_missing_ts is not None:
     age = round((now - last_btc_target_missing_ts) / 60.0, 1)
     ts_iso = datetime.fromtimestamp(last_btc_target_missing_ts, timezone.utc).isoformat()
