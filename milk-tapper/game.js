@@ -4,17 +4,19 @@ const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const livesEl = document.getElementById('lives');
 const levelEl = document.getElementById('level');
+const highEl = document.getElementById('high');
 const serveBtn = document.getElementById('serveBtn');
 const startBtn = document.getElementById('startBtn');
+const muteBtn = document.getElementById('muteBtn');
 
 const W = canvas.width;
 const H = canvas.height;
 const lanes = 4;
-const laneY = Array.from({length: lanes}, (_, i) => 90 + i * 110);
+const laneY = Array.from({ length: lanes }, (_, i) => 90 + i * 110);
 const barX = 120;
 const endX = W - 90;
 
-let running = false;
+let gameState = 'menu'; // menu | playing | gameover
 let score = 0;
 let lives = 3;
 let level = 1;
@@ -24,8 +26,33 @@ let milks = [];
 let spawnTimer = 0;
 let spawnEvery = 1200;
 let lastTime = 0;
+let highScore = Number(localStorage.getItem('milkTapperHighScore') || 0);
+let soundOn = true;
 
-function reset() {
+let audioCtx;
+function beep(freq = 440, dur = 0.06, type = 'square', gain = 0.05) {
+  if (!soundOn) return;
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  g.gain.value = gain;
+  osc.connect(g);
+  g.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + dur);
+}
+
+function updateHud() {
+  scoreEl.textContent = `Score: ${score}`;
+  livesEl.textContent = `Lives: ${lives}`;
+  levelEl.textContent = `Level: ${level}`;
+  highEl.textContent = `High: ${highScore}`;
+}
+
+function resetGame() {
   score = 0;
   lives = 3;
   level = 1;
@@ -34,19 +61,27 @@ function reset() {
   milks = [];
   spawnTimer = 0;
   spawnEvery = 1200;
-  running = true;
+  gameState = 'playing';
+  lastTime = 0;
   updateHud();
 }
 
-function updateHud() {
-  scoreEl.textContent = `Score: ${score}`;
-  livesEl.textContent = `Lives: ${lives}`;
-  levelEl.textContent = `Level: ${level}`;
+function startGame() {
+  resetGame();
+  beep(660, 0.07);
+}
+
+function saveHigh() {
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('milkTapperHighScore', String(highScore));
+  }
 }
 
 function serveMilk() {
-  if (!running) return;
+  if (gameState !== 'playing') return;
   milks.push({ lane: bartenderLane, x: barX + 30, speed: 300 + level * 30 });
+  beep(820, 0.04);
 }
 
 function spawnKid() {
@@ -56,19 +91,23 @@ function spawnKid() {
 
 function difficultyRamp() {
   level = 1 + Math.floor(score / 15);
-  spawnEvery = Math.max(450, 1200 - (level - 1) * 80);
+  spawnEvery = Math.max(420, 1200 - (level - 1) * 80);
 }
 
 function loseLife() {
   lives--;
+  beep(180, 0.11, 'sawtooth', 0.06);
   updateHud();
   if (lives <= 0) {
-    running = false;
+    gameState = 'gameover';
+    saveHigh();
+    updateHud();
+    beep(120, 0.2, 'triangle', 0.07);
   }
 }
 
 function update(dtMs) {
-  if (!running) return;
+  if (gameState !== 'playing') return;
   const dt = dtMs / 1000;
 
   spawnTimer += dtMs;
@@ -95,17 +134,54 @@ function update(dtMs) {
     }
     for (let j = kids.length - 1; j >= 0; j--) {
       const k = kids[j];
-      if (k.lane === m.lane && Math.abs(k.x - m.x) < 24) {
+      if (k.lane === m.lane && Math.abs(k.x - m.x) < 22) {
         kids.splice(j, 1);
         milks.splice(i, 1);
         score += 1;
         difficultyRamp();
+        if (score > highScore) {
+          highScore = score;
+          localStorage.setItem('milkTapperHighScore', String(highScore));
+        }
         updateHud();
+        beep(980, 0.05, 'square', 0.05);
         break;
       }
     }
   }
 }
+
+// simple pixel-sprite helper
+function pixelSprite(x, y, px, palette, map) {
+  for (let r = 0; r < map.length; r++) {
+    for (let c = 0; c < map[r].length; c++) {
+      const ch = map[r][c];
+      if (ch === '.') continue;
+      ctx.fillStyle = palette[ch] || '#fff';
+      ctx.fillRect(x + c * px, y + r * px, px, px);
+    }
+  }
+}
+
+const bartenderMap = [
+  '..aaa..',
+  '.abbb..',
+  '.accc..',
+  '.acccdd',
+  '.aeeee.',
+  '.aeeee.',
+  '..f..f.'
+];
+const bartenderPalette = { a: '#f5c89f', b: '#734f96', c: '#1f2d3d', d: '#ffffff', e: '#2c3e50', f: '#111111' };
+
+const kidMap = [
+  '..aa..',
+  '.abca.',
+  '.adda.',
+  '.aeea.',
+  '..ff..'
+];
+const kidPalette = { a: '#8bd3dd', b: '#f4d19b', c: '#1a1a1a', d: '#5d7092', e: '#6fa8dc', f: '#222' };
 
 function drawLane(y) {
   ctx.strokeStyle = '#78839b';
@@ -118,26 +194,36 @@ function drawLane(y) {
 
 function drawBartender() {
   const y = laneY[bartenderLane];
-  ctx.fillStyle = '#ffd166';
-  ctx.fillRect(barX - 30, y - 26, 28, 52);
-  ctx.fillStyle = '#2d3142';
-  ctx.fillRect(barX - 8, y - 20, 14, 40);
-  ctx.font = '20px system-ui';
-  ctx.fillText('🥛', barX + 4, y + 8);
+  pixelSprite(barX - 34, y - 28, 8, bartenderPalette, bartenderMap);
+  ctx.font = '16px monospace';
+  ctx.fillText('🥛', barX + 16, y + 6);
 }
 
 function drawKid(k) {
   const y = laneY[k.lane];
-  ctx.fillStyle = '#8bd3dd';
-  ctx.fillRect(k.x - 12, y - 16, 24, 34);
-  ctx.font = '18px system-ui';
-  ctx.fillText('🧒', k.x - 10, y + 8);
+  pixelSprite(k.x - 18, y - 20, 7, kidPalette, kidMap);
 }
 
 function drawMilk(m) {
   const y = laneY[m.lane];
-  ctx.font = '18px system-ui';
-  ctx.fillText('🥛', m.x - 8, y + 8);
+  ctx.fillStyle = '#f0f8ff';
+  ctx.fillRect(m.x - 6, y - 8, 12, 14);
+  ctx.fillStyle = '#dcefff';
+  ctx.fillRect(m.x - 4, y - 6, 8, 3);
+}
+
+function drawOverlay(title, line2) {
+  ctx.fillStyle = 'rgba(16,19,26,0.76)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 44px system-ui';
+  ctx.fillText(title, W / 2, H / 2 - 40);
+  ctx.font = '22px system-ui';
+  ctx.fillText(line2, W / 2, H / 2 + 6);
+  ctx.font = '16px system-ui';
+  ctx.fillText(`High Score: ${highScore}`, W / 2, H / 2 + 38);
+  ctx.textAlign = 'left';
 }
 
 function drawScene() {
@@ -153,17 +239,8 @@ function drawScene() {
   kids.forEach(drawKid);
   milks.forEach(drawMilk);
 
-  if (!running) {
-    ctx.fillStyle = 'rgba(16,19,26,0.72)';
-    ctx.fillRect(0,0,W,H);
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 44px system-ui';
-    ctx.fillText(lives <= 0 ? 'Game Over' : 'Milk Tapper', W/2, H/2 - 30);
-    ctx.font = '24px system-ui';
-    ctx.fillText('Press START / RESTART', W/2, H/2 + 14);
-    ctx.textAlign = 'left';
-  }
+  if (gameState === 'menu') drawOverlay('Milk Tapper', 'Press START / ENTER');
+  if (gameState === 'gameover') drawOverlay('Game Over', 'Press START / ENTER');
 }
 
 function tick(ts) {
@@ -178,17 +255,30 @@ function tick(ts) {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowUp') bartenderLane = Math.max(0, bartenderLane - 1);
   if (e.key === 'ArrowDown') bartenderLane = Math.min(lanes - 1, bartenderLane + 1);
-  if (e.key === ' ') { e.preventDefault(); serveMilk(); }
+  if (e.key === ' ') {
+    e.preventDefault();
+    serveMilk();
+  }
+  if (e.key === 'Enter' && gameState !== 'playing') startGame();
 });
 
 serveBtn.addEventListener('click', serveMilk);
-startBtn.addEventListener('click', () => { lastTime = 0; reset(); });
+startBtn.addEventListener('click', startGame);
+muteBtn.addEventListener('click', () => {
+  soundOn = !soundOn;
+  muteBtn.textContent = `SOUND: ${soundOn ? 'ON' : 'OFF'}`;
+});
 
 canvas.addEventListener('click', (e) => {
+  if (gameState !== 'playing') {
+    startGame();
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const y = (e.clientY - rect.top) * (canvas.height / rect.height);
   if (y < canvas.height / 2) bartenderLane = Math.max(0, bartenderLane - 1);
   else bartenderLane = Math.min(lanes - 1, bartenderLane + 1);
 });
 
+updateHud();
 requestAnimationFrame(tick);

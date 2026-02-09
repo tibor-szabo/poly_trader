@@ -2,8 +2,6 @@
   --bg: #10131a;
   --panel: #161b24;
   --ink: #f4f7ff;
-  --accent: #6ee7ff;
-  --danger: #ff6b6b;
 }
 * { box-sizing: border-box; }
 body {
@@ -17,7 +15,7 @@ header h1 { margin: 0 0 4px; }
 .sub { margin: 0 0 10px; opacity: 0.9; }
 .hud {
   display: flex; gap: 14px; flex-wrap: wrap;
-  background: var(--panel); border: 1px solid #2b3342;
+  background: #161b24; border: 1px solid #2b3342;
   border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
 }
 #game {
@@ -32,7 +30,7 @@ header h1 { margin: 0 0 4px; }
 }
 .controls {
   margin-top: 10px;
-  background: var(--panel);
+  background: #161b24;
   border: 1px solid #2b3342;
   border-radius: 10px;
   padding: 10px 12px;
@@ -44,7 +42,7 @@ button {
   border-radius: 10px;
   border: 1px solid #3b4559;
   background: #253043;
-  color: var(--ink);
+  color: #f4f7ff;
   font-weight: 700;
 }
 button:active { transform: translateY(1px); }
