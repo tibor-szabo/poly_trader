@@ -2,7 +2,7 @@
 import json
 import subprocess
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +40,7 @@ btc_target_missing_30m = 0
 btc_target_missing_15m = 0
 btc_target_missing_5m = 0
 btc_target_missing_markets_1h = set()
+btc_target_missing_market_counter_1h = Counter()
 last_btc_target_missing_ts = None
 now = time.time()
 
@@ -82,6 +83,7 @@ if EVENTS.exists():
                     mid = str(e.get("market_id") or "")
                     if mid:
                         btc_target_missing_markets_1h.add(mid)
+                        btc_target_missing_market_counter_1h[mid] += 1
 
 loop_n = ps_count(r"polymarket_mvp\.loop")
 dash_n = ps_count(r"polymarket_mvp\.dashboard")
@@ -171,6 +173,10 @@ print(
 )
 if missing_ids:
     print("btc_target_missing_market_ids", ",".join(missing_ids[:5]))
+if btc_target_missing_market_counter_1h:
+    top_mid, top_cnt = btc_target_missing_market_counter_1h.most_common(1)[0]
+    share = round((top_cnt / max(1, btc_target_missing_1h)) * 100.0, 1)
+    print("btc_target_missing_hotspot", top_mid, f"count={top_cnt}", f"share_pct={share}")
 if last_btc_target_missing_ts is not None:
     age = round((now - last_btc_target_missing_ts) / 60.0, 1)
     ts_iso = datetime.fromtimestamp(last_btc_target_missing_ts, timezone.utc).isoformat()
