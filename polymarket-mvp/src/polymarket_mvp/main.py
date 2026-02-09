@@ -44,6 +44,8 @@ _LAST_CLOSE_SIDE = {}
 _LAST_CLOSE_PNL = {}
 _EDGE_HIST = {}
 _WINNER_HIST = {}
+_PRICE_SRC_HIST = {"binance": [], "coinbase": [], "kraken": [], "bybit": []}
+_PRICE_SRC_LAST = {"coinbase": 0.0, "kraken": 0.0, "bybit": 0.0}
 _FLIP_FAIL_STREAK = {}
 _MARKET_LOCK_UNTIL = {}
 
@@ -147,40 +149,74 @@ def _price_near_ts(ts: float, max_delta_s: float = 120.0) -> Optional[float]:
     return best
 
 
-def _binance_impulse_signal() -> dict:
-    # Detect very short-term Binance impulse for scalp entries.
-    if len(_BTC_SIGNAL_HISTORY) < 8:
-        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0}
-    now = _BTC_SIGNAL_HISTORY[-1]
-    bi_now = now.get("bi")
-    if bi_now is None or float(bi_now) <= 0:
-        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0}
+def _fetch_alt_price(source: str) -> Optional[float]:
+    try:
+        if source == "coinbase":
+            r = httpx.get("https://api.exchange.coinbase.com/products/BTC-USD/ticker", timeout=1.5)
+            if r.status_code == 200:
+                return float(r.json().get("price"))
+        elif source == "kraken":
+            r = httpx.get("https://api.kraken.com/0/public/Ticker?pair=XBTUSD", timeout=1.5)
+            if r.status_code == 200:
+                obj = r.json().get("result", {})
+                if isinstance(obj, dict) and obj:
+                    k = next(iter(obj.keys()))
+                    return float(obj[k]["c"][0])
+        elif source == "bybit":
+            r = httpx.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT", timeout=1.5)
+            if r.status_code == 200:
+                lst = (((r.json() or {}).get("result") or {}).get("list") or [])
+                if lst:
+                    return float(lst[0].get("lastPrice"))
+    except Exception:
+        return None
+    return None
 
+
+def _push_src_hist(source: str, price: Optional[float]):
+    if price is None or price <= 0:
+        return
+    now = datetime.now(timezone.utc).timestamp()
+    arr = _PRICE_SRC_HIST.setdefault(source, [])
+    arr.append({"t": now, "p": float(price)})
+    keep = now - 120.0
+    while arr and float(arr[0].get("t", 0.0)) < keep:
+        arr.pop(0)
+
+
+def _impulse_signal(source: str) -> dict:
+    arr = _PRICE_SRC_HIST.get(source) or []
+    if len(arr) < 8:
+        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0, "source": source}
+    now = arr[-1]
+    p_now = float(now.get("p", 0.0))
     t_now = float(now.get("t", 0.0))
+    if p_now <= 0:
+        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0, "source": source}
+
     p3 = None
     p8 = None
-    for x in reversed(_BTC_SIGNAL_HISTORY):
+    for x in reversed(arr):
         dt = t_now - float(x.get("t", 0.0))
-        bi = x.get("bi")
-        if bi is None:
+        p = float(x.get("p", 0.0))
+        if p <= 0:
             continue
         if p3 is None and dt >= 3.0:
-            p3 = float(bi)
+            p3 = p
         if p8 is None and dt >= 8.0:
-            p8 = float(bi)
+            p8 = p
             break
-    if p3 is None or p8 is None or p3 <= 0 or p8 <= 0:
-        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0}
+    if p3 is None or p8 is None:
+        return {"side": None, "bps_3s": 0.0, "bps_8s": 0.0, "source": source}
 
-    bps_3s = ((float(bi_now) - p3) / p3) * 10000.0
-    bps_8s = ((float(bi_now) - p8) / p8) * 10000.0
-
+    bps_3s = ((p_now - p3) / p3) * 10000.0
+    bps_8s = ((p_now - p8) / p8) * 10000.0
     side = None
     if bps_3s >= 7.0 and bps_8s >= 10.0:
         side = "BUY_YES"
     elif bps_3s <= -7.0 and bps_8s <= -10.0:
         side = "BUY_NO"
-    return {"side": side, "bps_3s": bps_3s, "bps_8s": bps_8s}
+    return {"side": side, "bps_3s": bps_3s, "bps_8s": bps_8s, "source": source}
 
 
 def _compute_btc_signal() -> dict:
@@ -961,7 +997,17 @@ def run_once(cfg: dict):
     buy_no_consensus_floor = int(strategy_cfg.get("buy_no_consensus_floor", 4))
     buy_no_reentry_cooldown_mult = float(strategy_cfg.get("buy_no_reentry_cooldown_mult", 1.35))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
-    impulse = _binance_impulse_signal()
+
+    impulse_source = str(strategy_cfg.get("impulse_source", "binance")).lower()
+    cl_live, bi_live = _btc_live_prices()
+    _push_src_hist("binance", bi_live)
+    now_imp_ts = datetime.now(timezone.utc).timestamp()
+    if impulse_source in {"coinbase", "kraken", "bybit"}:
+        if now_imp_ts - float(_PRICE_SRC_LAST.get(impulse_source, 0.0)) >= 1.0:
+            px = _fetch_alt_price(impulse_source)
+            _PRICE_SRC_LAST[impulse_source] = now_imp_ts
+            _push_src_hist(impulse_source, px)
+    impulse = _impulse_signal(impulse_source)
 
     for r in btc_rows:
         # Trade only markets with known target BTC.
@@ -1039,6 +1085,9 @@ def run_once(cfg: dict):
         # Hard-stop losses are expensive; cool down that side materially longer.
         if last_close_reason == "hard_stop_25" and winner_side == last_close_side:
             reentry_cooldown_s = max(reentry_cooldown_s, 600.0)
+        # Wrong-way exits indicate unstable read; force a longer cooldown before re-entry.
+        if last_close_reason in {"against_winner_no_reversal", "edge_flip_wrong_way"}:
+            reentry_cooldown_s = max(reentry_cooldown_s, 420.0)
         lock_until = float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)
         lock_ok = now_epoch >= lock_until
         cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok
@@ -1064,13 +1113,16 @@ def run_once(cfg: dict):
         if open_side == "BUY_NO" and last_close_side == "BUY_NO" and last_close_pnl <= 0 and (now_epoch - last_close_ts) < 1800:
             conf_floor += 4
             consensus_floor += 1
-        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok
+        # Avoid late contrarian flips when winner side is already stable.
+        late_contrarian_block = (t_left_s < 240) and (winner_stability >= 0.70) and (open_side != winner_side)
+
+        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block)
 
         # Fast Binance impulse scalp: take movement direction, then exit quickly when edge decays.
         impulse_side = impulse.get("side")
         impulse_bps = float(impulse.get("bps_3s") or 0.0)
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 9.0 and impulse_edge >= 0.02 and len(open_map) < max_open_positions and cool_ok
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 9.0 and impulse_edge >= 0.02 and len(open_map) < max_open_positions and cool_ok and t_left_s >= 75
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
@@ -1080,7 +1132,7 @@ def run_once(cfg: dict):
             if scalp_open_ok:
                 size_mul = min(size_mul, 0.65)
             size_usd = min(trade_cap * size_mul, float(state.cash_usd))
-            model_tag = (f"SCALP:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
+            model_tag = (f"SCALP:{impulse.get('source','src')}:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
             if entry > 0 and size_usd >= 1.0:
                 pos = open_position(
                     state,

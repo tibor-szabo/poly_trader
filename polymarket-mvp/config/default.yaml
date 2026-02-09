@@ -52,12 +52,12 @@ strategy:
   impulse_source: "bybit"  # binance|coinbase|kraken|bybit
   trade_cap_usd: 100
   max_open_positions: 2
-  base_reentry_cooldown_s: 180
+  base_reentry_cooldown_s: 210
   flip_reentry_cooldown_s: 540
   min_hold_for_flip_exit_s: 45
   buy_no_conf_floor: 52
   buy_no_consensus_floor: 4
-  buy_no_reentry_cooldown_mult: 1.35
+  buy_no_reentry_cooldown_mult: 1.45
 
 storage:
   state_path: "data/state.json"
