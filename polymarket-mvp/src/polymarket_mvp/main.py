@@ -994,8 +994,10 @@ def run_once(cfg: dict):
     base_reentry_cooldown_s = float(strategy_cfg.get("base_reentry_cooldown_s", 120.0))
     flip_reentry_cooldown_s = float(strategy_cfg.get("flip_reentry_cooldown_s", 240.0))
     min_hold_for_flip_exit_s = float(strategy_cfg.get("min_hold_for_flip_exit_s", 20.0))
+    flip_signal_conf_min = int(strategy_cfg.get("flip_signal_conf_min", 62))
     flip_stop_loss_pct = float(strategy_cfg.get("flip_stop_loss_pct", -0.12))
     buy_no_flip_stop_loss_pct = float(strategy_cfg.get("buy_no_flip_stop_loss_pct", -0.10))
+    flip_stop_loss_lock_seconds = int(strategy_cfg.get("flip_stop_loss_lock_seconds", 480))
     normal_open_min_winner_stability = float(strategy_cfg.get("normal_open_min_winner_stability", 0.12))
     normal_open_buy_yes_min_winner_stability = float(strategy_cfg.get("normal_open_buy_yes_min_winner_stability", 0.30))
     normal_open_max_opposing_impulse_bps = float(strategy_cfg.get("normal_open_max_opposing_impulse_bps", 3.0))
@@ -1205,7 +1207,7 @@ def run_once(cfg: dict):
             t_left = (end_ts - now_ts) if end_ts > 0 else 999999.0
             held_edge = edge_yes if open_pos.side == "BUY_YES" else edge_no
             opp_edge = edge_no if open_pos.side == "BUY_YES" else edge_yes
-            flip = (side != open_pos.side) and conf >= 62
+            flip = (side != open_pos.side) and conf >= flip_signal_conf_min
             against_winner = (open_pos.side != winner_side)
 
             peak = float(open_pos.edge_peak if open_pos.edge_peak is not None else (open_pos.edge_entry or held_edge or 0.0))
@@ -1316,6 +1318,24 @@ def run_once(cfg: dict):
                             "type": "market_guardrail",
                             "market_id": mid,
                             "reason": "single_hard_stop_cooloff",
+                            "flip_fail_streak": streak,
+                            "lock_seconds": lock_s,
+                            "lock_until_ts": _MARKET_LOCK_UNTIL[mid],
+                            "last_close_reason": close_reason,
+                            "last_pnl_usd": round(float(pnl), 4),
+                        })
+
+                    # Flip-stop loss usually means noisy direction change; cool off this market briefly.
+                    if close_reason == "flip_stop" and pnl <= 0 and flip_stop_loss_lock_seconds > 0:
+                        lock_s = flip_stop_loss_lock_seconds
+                        _MARKET_LOCK_UNTIL[mid] = max(
+                            float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0),
+                            datetime.now(timezone.utc).timestamp() + lock_s,
+                        )
+                        append_event(cfg["storage"]["events_path"], {
+                            "type": "market_guardrail",
+                            "market_id": mid,
+                            "reason": "flip_stop_loss_cooloff",
                             "flip_fail_streak": streak,
                             "lock_seconds": lock_s,
                             "lock_until_ts": _MARKET_LOCK_UNTIL[mid],

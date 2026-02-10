@@ -55,12 +55,14 @@ strategy:
   max_open_positions: 2
   base_reentry_cooldown_s: 240
   flip_reentry_cooldown_s: 600
-  min_hold_for_flip_exit_s: 60
+  min_hold_for_flip_exit_s: 75
+  flip_signal_conf_min: 66
   flip_stop_loss_pct: -0.12
   buy_no_flip_stop_loss_pct: -0.10
-  buy_yes_conf_floor: 55
-  buy_yes_consensus_floor: 5
-  buy_yes_reentry_cooldown_mult: 1.35
+  flip_stop_loss_lock_seconds: 480
+  buy_yes_conf_floor: 57
+  buy_yes_consensus_floor: 6
+  buy_yes_reentry_cooldown_mult: 1.6
   buy_no_conf_floor: 54
   buy_no_consensus_floor: 5
   buy_no_reentry_cooldown_mult: 1.45
