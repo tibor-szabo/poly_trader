@@ -65,6 +65,16 @@ def main() -> None:
             f" | {m.get('market_name')}"
         )
 
+    btc_tick = stats.get("latestBtcTick") or {}
+    chainlink = btc_tick.get("chainlink")
+    binance = btc_tick.get("binance")
+    if isinstance(chainlink, (int, float)) and isinstance(binance, (int, float)) and chainlink:
+        delta_bps = ((binance - chainlink) / chainlink) * 10_000
+        print(f"btc_tick: chainlink={chainlink:.2f} binance={binance:.2f} delta_bps={delta_bps:.1f}")
+
+    opp = stats.get("latestOpportunitySeen") or {}
+    print(f"latest_opportunities: {opp.get('count', 0)}")
+
     cands = (stats.get("latestScan") or {}).get("top_candidates", [])
     print(f"top_candidates: {len(cands)}")
     for c in cands[:5]:
