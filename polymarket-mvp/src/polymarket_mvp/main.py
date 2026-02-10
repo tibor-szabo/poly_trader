@@ -916,11 +916,16 @@ def run_once(cfg: dict):
             break
     alt_rows = picked
 
+    alt_enabled = alt_limit > 0
     append_event(cfg["storage"]["events_path"], {
         "type": "market_groups",
         "bitcoin": btc_rows,
         "secondary": alt_rows,
-        "secondary_note": f"Non-BTC markets resolving within {alt_horizon_days} days, ranked by paired YES+NO arb proximity (sum toward <1)",
+        "secondary_note": (
+            f"Non-BTC markets resolving within {alt_horizon_days} days, ranked by paired YES+NO arb proximity (sum toward <1)"
+            if alt_enabled else
+            "Secondary group disabled (BTC-only focus)"
+        ),
         "counts": {"bitcoin": len(btc_rows), "secondary": len(alt_rows)},
     })
 
