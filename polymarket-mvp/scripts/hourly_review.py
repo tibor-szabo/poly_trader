@@ -53,7 +53,7 @@ def main():
     now = time.time()
     window_s = max(60.0, float(args.window_hours) * 3600.0)
     cut = now - window_s
-    opens, closes, guards = [], [], []
+    opens, closes, partial_closes, guards = [], [], [], []
 
     for line in iter_recent_lines(args.events, args.recent_lines):
         try:
@@ -65,10 +65,13 @@ def main():
             continue
         typ = e.get("type")
         if typ == "paper_trade":
-            if e.get("action") == "OPEN":
+            action = str(e.get("action") or "")
+            if action == "OPEN":
                 opens.append(e)
-            elif "CLOSE" in str(e.get("action") or ""):
+            elif action == "CLOSE":
                 closes.append(e)
+            elif action == "PARTIAL_CLOSE":
+                partial_closes.append(e)
         elif typ == "market_guardrail":
             guards.append(e)
 
@@ -112,6 +115,7 @@ def main():
     fast_reentries = 0
     hold_s = []
     closes_per_market = Counter(str(e.get("market_id") or "") for e in closes if e.get("market_id") is not None)
+    partials_per_market = Counter(str(e.get("market_id") or "") for e in partial_closes if e.get("market_id") is not None)
     for e in opens:
         mid = str(e.get("market_id") or "")
         ot = to_epoch(e.get("opened_at") or e.get("ts"))
@@ -135,7 +139,7 @@ def main():
 
     out = {
         "window_minutes": round(window_s / 60.0, 2),
-        "counts": {"opens": len(opens), "closes": len(closes)},
+        "counts": {"opens": len(opens), "closes": len(closes), "partial_closes": len(partial_closes)},
         "pnl_usd": round(pnl, 4),
         "winrate_pct": round(winrate, 2),
         "wins": wins,
@@ -157,6 +161,9 @@ def main():
             "markets_with_multiple_closes": sum(1 for _, n in closes_per_market.items() if n > 1),
             "top_repeated_markets": [
                 {"market_id": k, "closes": n} for k, n in closes_per_market.most_common(3) if n > 1
+            ],
+            "top_partial_close_markets": [
+                {"market_id": k, "partial_closes": n} for k, n in partials_per_market.most_common(3) if n > 1
             ],
         },
         "guardrails_triggered": len(guards),

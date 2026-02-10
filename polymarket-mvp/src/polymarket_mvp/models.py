@@ -48,6 +48,7 @@ class PaperPosition(BaseModel):
     edge_entry: Optional[float] = None
     edge_peak: Optional[float] = None
     close_reason: Optional[str] = None
+    tp35_taken: bool = False
 
 
 class RunState(BaseModel):

@@ -1274,7 +1274,7 @@ def run_once(cfg: dict):
             # take profit ladder (single-step per cycle)
             elif u_pnl >= 0.50:
                 close_reason, close_frac = "tp_50", 1.0
-            elif u_pnl >= 0.35:
+            elif u_pnl >= 0.35 and not bool(getattr(open_pos, "tp35_taken", False)):
                 close_reason, close_frac = "tp_35_half", 0.5
 
             if close_frac > 0:
@@ -1290,6 +1290,8 @@ def run_once(cfg: dict):
                 else:
                     pnl = close_fraction(state, open_pos, exit_price, close_frac)
                     open_pos.pnl_usd = float((open_pos.pnl_usd or 0.0) + pnl)
+                    if close_reason == "tp_35_half":
+                        open_pos.tp35_taken = True
 
                 # Model learning updates only on full close (clean attribution)
                 if close_frac >= 1.0:
