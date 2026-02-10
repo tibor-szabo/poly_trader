@@ -1123,8 +1123,12 @@ def run_once(cfg: dict):
 
         conf_floor = buy_no_conf_floor if open_side == "BUY_NO" else buy_yes_conf_floor
         consensus_floor = buy_no_consensus_floor if open_side == "BUY_NO" else buy_yes_consensus_floor
+        # Side-specific loss cooloff: after a recent same-side loss, require stronger setup.
         if open_side == "BUY_NO" and last_close_side == "BUY_NO" and last_close_pnl <= 0 and (now_epoch - last_close_ts) < 1800:
             conf_floor += 4
+            consensus_floor += 1
+        elif open_side == "BUY_YES" and last_close_side == "BUY_YES" and last_close_pnl <= 0 and (now_epoch - last_close_ts) < 1800:
+            conf_floor += 3
             consensus_floor += 1
         # Fast Binance impulse scalp: take movement direction, then exit quickly when edge decays.
         impulse_side = impulse.get("side")
