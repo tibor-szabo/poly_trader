@@ -200,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
             last_blob = None
             try:
                 while True:
-                    events = read_events(800)
+                    events = read_events(5000)
                     state = read_state()
                     stats = api_stats(events)
                     blob = json.dumps({"state": state, "apiStats": stats, "serverTime": datetime.now(timezone.utc).isoformat()})
@@ -212,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return
 
-        events = read_events(800)
+        events = read_events(5000)
         state = read_state()
         stats = api_stats(events)
 

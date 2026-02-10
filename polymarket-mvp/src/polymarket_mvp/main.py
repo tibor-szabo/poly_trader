@@ -903,18 +903,21 @@ def run_once(cfg: dict):
     # Diversity cap so one theme doesn't dominate the panel.
     alt_limit = int(cfg.get("data", {}).get("alt_group_size", 10))
     per_topic_cap = int(cfg.get("data", {}).get("alt_group_topic_cap", 3))
-    picked = []
-    topic_counts = {}
-    for r in alt_rows:
-        rr = alt_ref_by_id.get(r.get("market_id"))
-        topic = _topic_bucket(getattr(rr, "question", ""), getattr(rr, "slug", ""))
-        if topic_counts.get(topic, 0) >= per_topic_cap:
-            continue
-        topic_counts[topic] = topic_counts.get(topic, 0) + 1
-        picked.append(r)
-        if len(picked) >= alt_limit:
-            break
-    alt_rows = picked
+    if alt_limit <= 0:
+        alt_rows = []
+    else:
+        picked = []
+        topic_counts = {}
+        for r in alt_rows:
+            rr = alt_ref_by_id.get(r.get("market_id"))
+            topic = _topic_bucket(getattr(rr, "question", ""), getattr(rr, "slug", ""))
+            if topic_counts.get(topic, 0) >= per_topic_cap:
+                continue
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
+            picked.append(r)
+            if len(picked) >= alt_limit:
+                break
+        alt_rows = picked
 
     alt_enabled = alt_limit > 0
     append_event(cfg["storage"]["events_path"], {
