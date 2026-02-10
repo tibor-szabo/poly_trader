@@ -48,6 +48,8 @@ _PRICE_SRC_HIST = {"binance": [], "coinbase": [], "kraken": [], "bybit": []}
 _PRICE_SRC_LAST = {"coinbase": 0.0, "kraken": 0.0, "bybit": 0.0}
 _FLIP_FAIL_STREAK = {}
 _MARKET_LOCK_UNTIL = {}
+_GLOBAL_OPEN_PAUSE_UNTIL = 0.0
+_RECENT_FLIP_STOP_LOSS_TS = []
 
 
 def _ensure_ws_hook() -> ClobWsHook:
@@ -474,6 +476,7 @@ def _topic_bucket(question: str, slug: str) -> str:
 
 
 def run_once(cfg: dict):
+    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS
     _ensure_btc_live_feed(cfg["storage"]["events_path"])
 
     clob = ClobAdapter(cfg["data"]["clob_rest_base"])
@@ -998,6 +1001,9 @@ def run_once(cfg: dict):
     flip_stop_loss_pct = float(strategy_cfg.get("flip_stop_loss_pct", -0.12))
     buy_no_flip_stop_loss_pct = float(strategy_cfg.get("buy_no_flip_stop_loss_pct", -0.10))
     flip_stop_loss_lock_seconds = int(strategy_cfg.get("flip_stop_loss_lock_seconds", 480))
+    global_flip_stop_pause_seconds = int(strategy_cfg.get("global_flip_stop_pause_seconds", 0))
+    global_flip_stop_window_seconds = int(strategy_cfg.get("global_flip_stop_window_seconds", 1200))
+    global_flip_stop_trigger_count = int(strategy_cfg.get("global_flip_stop_trigger_count", 2))
     normal_open_min_winner_stability = float(strategy_cfg.get("normal_open_min_winner_stability", 0.12))
     normal_open_buy_yes_min_winner_stability = float(strategy_cfg.get("normal_open_buy_yes_min_winner_stability", 0.30))
     normal_open_max_opposing_impulse_bps = float(strategy_cfg.get("normal_open_max_opposing_impulse_bps", 3.0))
@@ -1103,7 +1109,8 @@ def run_once(cfg: dict):
             reentry_cooldown_s = max(reentry_cooldown_s, 420.0)
         lock_until = float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)
         lock_ok = now_epoch >= lock_until
-        cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok
+        global_pause_ok = now_epoch >= float(_GLOBAL_OPEN_PAUSE_UNTIL or 0.0)
+        cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok and global_pause_ok
         open_side = winner_side
         required_edge = 0.04 if winner_side == "BUY_YES" else 0.04
         if p_hit > 0.65 and winner_stability >= 0.7:
@@ -1346,6 +1353,31 @@ def run_once(cfg: dict):
                             "last_close_reason": close_reason,
                             "last_pnl_usd": round(float(pnl), 4),
                         })
+
+                        # Cross-market churn brake: repeated flip-stop losses often signal regime whipsaw.
+                        now_ts = datetime.now(timezone.utc).timestamp()
+                        if global_flip_stop_pause_seconds > 0 and global_flip_stop_trigger_count > 0:
+                            _RECENT_FLIP_STOP_LOSS_TS = [
+                                t for t in _RECENT_FLIP_STOP_LOSS_TS
+                                if (now_ts - float(t)) <= max(60, global_flip_stop_window_seconds)
+                            ]
+                            _RECENT_FLIP_STOP_LOSS_TS.append(now_ts)
+                            if len(_RECENT_FLIP_STOP_LOSS_TS) >= global_flip_stop_trigger_count:
+                                _GLOBAL_OPEN_PAUSE_UNTIL = max(
+                                    float(_GLOBAL_OPEN_PAUSE_UNTIL or 0.0),
+                                    now_ts + float(global_flip_stop_pause_seconds),
+                                )
+                                append_event(cfg["storage"]["events_path"], {
+                                    "type": "market_guardrail",
+                                    "market_id": "*",
+                                    "reason": "global_flip_stop_cooloff",
+                                    "lock_seconds": int(global_flip_stop_pause_seconds),
+                                    "lock_until_ts": _GLOBAL_OPEN_PAUSE_UNTIL,
+                                    "recent_flip_stop_losses": len(_RECENT_FLIP_STOP_LOSS_TS),
+                                    "window_seconds": int(global_flip_stop_window_seconds),
+                                    "last_close_reason": close_reason,
+                                    "last_pnl_usd": round(float(pnl), 4),
+                                })
 
                     if streak >= 2:
                         lock_s = min(900, 300 + (streak - 2) * 180)

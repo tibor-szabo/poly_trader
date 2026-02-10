@@ -57,9 +57,12 @@ strategy:
   flip_reentry_cooldown_s: 600
   min_hold_for_flip_exit_s: 90
   flip_signal_conf_min: 68
-  flip_stop_loss_pct: -0.10
+  flip_stop_loss_pct: -0.08
   buy_no_flip_stop_loss_pct: -0.10
   flip_stop_loss_lock_seconds: 900
+  global_flip_stop_pause_seconds: 180
+  global_flip_stop_window_seconds: 1200
+  global_flip_stop_trigger_count: 2
   buy_yes_conf_floor: 60
   buy_yes_consensus_floor: 6
   buy_yes_reentry_cooldown_mult: 1.6
