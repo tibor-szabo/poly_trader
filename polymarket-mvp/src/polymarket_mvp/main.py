@@ -1305,6 +1305,24 @@ def run_once(cfg: dict):
                             "last_pnl_usd": round(float(pnl), 4),
                         })
 
+                    # Hard-stop losses are costly; pause this market longer before trying again.
+                    if close_reason == "hard_stop_25" and pnl <= 0:
+                        lock_s = 720
+                        _MARKET_LOCK_UNTIL[mid] = max(
+                            float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0),
+                            datetime.now(timezone.utc).timestamp() + lock_s,
+                        )
+                        append_event(cfg["storage"]["events_path"], {
+                            "type": "market_guardrail",
+                            "market_id": mid,
+                            "reason": "single_hard_stop_cooloff",
+                            "flip_fail_streak": streak,
+                            "lock_seconds": lock_s,
+                            "lock_until_ts": _MARKET_LOCK_UNTIL[mid],
+                            "last_close_reason": close_reason,
+                            "last_pnl_usd": round(float(pnl), 4),
+                        })
+
                     if streak >= 2:
                         lock_s = min(900, 300 + (streak - 2) * 180)
                         _MARKET_LOCK_UNTIL[mid] = datetime.now(timezone.utc).timestamp() + lock_s
