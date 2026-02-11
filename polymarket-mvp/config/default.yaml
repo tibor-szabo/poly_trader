@@ -57,18 +57,21 @@ strategy:
   flip_reentry_cooldown_s: 600
   min_hold_for_flip_exit_s: 90
   flip_signal_conf_min: 68
-  flip_stop_loss_pct: -0.08
+  flip_stop_loss_pct: -0.06
   buy_no_flip_stop_loss_pct: -0.10
   flip_stop_loss_lock_seconds: 900
   global_flip_stop_pause_seconds: 180
   global_flip_stop_window_seconds: 1200
-  global_flip_stop_trigger_count: 2
+  global_flip_stop_trigger_count: 1
   buy_yes_conf_floor: 60
   buy_yes_consensus_floor: 6
-  buy_yes_reentry_cooldown_mult: 1.6
+  buy_yes_reentry_cooldown_mult: 1.9
   buy_no_conf_floor: 54
   buy_no_consensus_floor: 5
   buy_no_reentry_cooldown_mult: 1.45
+  scalp_min_impulse_bps: 9.0
+  scalp_buy_yes_min_impulse_bps: 12.0
+  scalp_buy_no_min_impulse_bps: 9.0
   normal_open_min_winner_stability: 0.18
   normal_open_buy_yes_min_winner_stability: 0.30
   normal_open_max_opposing_impulse_bps: 2.5

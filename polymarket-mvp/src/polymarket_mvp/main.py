@@ -1021,6 +1021,9 @@ def run_once(cfg: dict):
     buy_no_conf_floor = int(strategy_cfg.get("buy_no_conf_floor", 52))
     buy_no_consensus_floor = int(strategy_cfg.get("buy_no_consensus_floor", 4))
     buy_no_reentry_cooldown_mult = float(strategy_cfg.get("buy_no_reentry_cooldown_mult", 1.35))
+    scalp_min_impulse_bps = float(strategy_cfg.get("scalp_min_impulse_bps", 9.0))
+    scalp_buy_yes_min_impulse_bps = float(strategy_cfg.get("scalp_buy_yes_min_impulse_bps", scalp_min_impulse_bps))
+    scalp_buy_no_min_impulse_bps = float(strategy_cfg.get("scalp_buy_no_min_impulse_bps", scalp_min_impulse_bps))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
 
     impulse_source = str(strategy_cfg.get("impulse_source", "binance")).lower()
@@ -1161,7 +1164,8 @@ def run_once(cfg: dict):
         normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block) and (not low_stability_block) and (not impulse_against_open)
 
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= 9.0 and impulse_edge >= 0.02 and len(open_map) < max_open_positions and cool_ok and t_left_s >= 75
+        scalp_impulse_req = scalp_buy_yes_min_impulse_bps if impulse_side == "BUY_YES" else scalp_buy_no_min_impulse_bps
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= 0.02 and len(open_map) < max_open_positions and cool_ok and t_left_s >= 75
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
