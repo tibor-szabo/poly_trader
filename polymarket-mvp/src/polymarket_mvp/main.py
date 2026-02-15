@@ -50,6 +50,95 @@ _FLIP_FAIL_STREAK = {}
 _MARKET_LOCK_UNTIL = {}
 _GLOBAL_OPEN_PAUSE_UNTIL = 0.0
 _RECENT_FLIP_STOP_LOSS_TS = []
+_PENDING_CLOSES = {}
+
+
+def _pos_key(pos) -> str:
+    return f"{pos.market_id}|{pos.opened_at}|{pos.side}"
+
+
+def _round_price(px: float, tick: float) -> float:
+    if tick <= 0:
+        return float(px)
+    return round(round(float(px) / tick) * tick, 6)
+
+
+def _build_close_order(side: str, row: dict, cfg: dict) -> dict:
+    ex = cfg.get("execution", {})
+    close_mode = str(ex.get("close_mode", "limit_first")).lower()
+    tick = float(ex.get("tick_size", 0.001))
+    improve_ticks = int(ex.get("close_limit_improve_ticks", 1))
+
+    bid = float(row.get("best_bid_yes") or 0.0) if side == "BUY_YES" else float(row.get("best_bid_no") or 0.0)
+    ask = float(row.get("best_ask_yes") or 0.0) if side == "BUY_YES" else float(row.get("best_ask_no") or 0.0)
+
+    # Selling out of an existing BUY_YES/BUY_NO position.
+    taker_px = bid if bid > 0 else ask
+    if close_mode == "market":
+        return {"mode": "market", "taker_price": taker_px, "limit_price": None, "bid": bid, "ask": ask}
+
+    if bid > 0 and ask > 0 and ask >= bid:
+        target = min(ask, bid + (improve_ticks * tick))
+    elif ask > 0:
+        target = ask
+    else:
+        target = bid
+    target = _round_price(target, tick)
+    return {"mode": "limit_first", "taker_price": taker_px, "limit_price": target, "bid": bid, "ask": ask}
+
+
+def _resolve_limit_close(pos, close_reason: str, order: dict, cfg: dict):
+    ex = cfg.get("execution", {})
+    timeout_s = float(ex.get("close_limit_timeout_s", 20.0))
+    reprice_s = float(ex.get("close_limit_reprice_s", 4.0))
+    tick = float(ex.get("tick_size", 0.001))
+    force_reasons = set(ex.get("close_force_taker_reasons", ["hard_stop_25", "resolved_loss_proxy", "flip_stop"]))
+
+    key = _pos_key(pos)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    bid = float(order.get("bid") or 0.0)
+    ask = float(order.get("ask") or 0.0)
+    taker_px = float(order.get("taker_price") or 0.0)
+    limit_px = float(order.get("limit_price") or 0.0)
+
+    if close_reason in force_reasons:
+        _PENDING_CLOSES.pop(key, None)
+        return (taker_px if taker_px > 0 else None), "close_force_taker", None
+
+    st = _PENDING_CLOSES.get(key)
+    if st is None:
+        st = {
+            "created_ts": now_ts,
+            "last_reprice_ts": now_ts,
+            "attempts": 1,
+            "limit_price": limit_px,
+            "reason": close_reason,
+        }
+        _PENDING_CLOSES[key] = st
+    else:
+        if (now_ts - float(st.get("last_reprice_ts") or 0.0)) >= reprice_s:
+            st["attempts"] = int(st.get("attempts") or 0) + 1
+            st["last_reprice_ts"] = now_ts
+            if bid > 0:
+                st["limit_price"] = _round_price(min(float(st.get("limit_price") or limit_px), bid + tick), tick)
+
+    lp = float(st.get("limit_price") or 0.0)
+    if bid > 0 and lp > 0 and bid >= lp:
+        _PENDING_CLOSES.pop(key, None)
+        return lp, "close_limit_fill", {"wait_s": round(now_ts - float(st.get("created_ts") or now_ts), 2), "attempts": st.get("attempts")}
+
+    if (now_ts - float(st.get("created_ts") or now_ts)) >= timeout_s:
+        _PENDING_CLOSES.pop(key, None)
+        px = taker_px if taker_px > 0 else (bid if bid > 0 else ask)
+        return (px if px > 0 else None), "close_limit_timeout_fallback", {"wait_s": round(now_ts - float(st.get("created_ts") or now_ts), 2), "attempts": st.get("attempts")}
+
+    return None, None, {
+        "wait_s": round(now_ts - float(st.get("created_ts") or now_ts), 2),
+        "attempts": st.get("attempts"),
+        "limit_price": lp,
+        "best_bid": bid,
+        "best_ask": ask,
+    }
 
 
 def _ensure_ws_hook() -> ClobWsHook:
@@ -1169,7 +1258,28 @@ def run_once(cfg: dict):
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
-            entry = ask_yes if side == "BUY_YES" else ask_no
+            ask_open = ask_yes if side == "BUY_YES" else ask_no
+            bid_open = float(r.get("best_bid_yes") or 0.0) if side == "BUY_YES" else float(r.get("best_bid_no") or 0.0)
+            ex_cfg = cfg.get("execution", {})
+            open_mode = str(ex_cfg.get("open_mode", "limit_first")).lower()
+            tick = float(ex_cfg.get("tick_size", 0.001))
+            improve_ticks = int(ex_cfg.get("open_limit_improve_ticks", 1))
+            open_fallback_taker = bool(ex_cfg.get("open_limit_fallback_taker", True))
+            if open_mode == "market":
+                entry = ask_open
+                open_exec = "open_market"
+            else:
+                limit_open = _round_price(max(0.0, bid_open + (improve_ticks * tick)), tick) if bid_open > 0 else ask_open
+                if ask_open > 0 and limit_open >= ask_open:
+                    entry = ask_open
+                    open_exec = "open_limit_fill"
+                elif open_fallback_taker and ask_open > 0:
+                    entry = ask_open
+                    open_exec = "open_limit_timeout_fallback"
+                else:
+                    entry = 0.0
+                    open_exec = "open_limit_pending_skip"
+
             # Confidence-weighted sizing; smaller size for scalp entries.
             size_mul = max(0.5, min(1.0, 0.5 + (conf / 100.0) * 0.6))
             if scalp_open_ok:
@@ -1201,6 +1311,7 @@ def run_once(cfg: dict):
                     "entry_price": round(pos.entry_price, 4),
                     "opened_at": pos.opened_at,
                     "model": model_tag,
+                    "open_execution": open_exec,
                     "confidence": conf,
                     "consensus": consensus,
                     "winner_side": winner_side,
@@ -1210,20 +1321,20 @@ def run_once(cfg: dict):
                     "edge_yes": round(edge_yes, 4),
                     "edge_no": round(edge_no, 4),
                 })
-                print(f"[green]OPEN[/green] {mid} {side} size=${pos.size_usd:.2f} price={pos.entry_price:.4f} model={model_tag} conf={conf} cons={consensus}")
+                print(f"[green]OPEN[/green] {mid} {side} size=${pos.size_usd:.2f} price={pos.entry_price:.4f} exec={open_exec} model={model_tag} conf={conf} cons={consensus}")
             continue
 
         # Close policy v1: resolve proxy + tp ladder + stops + time decay + flip stop.
         if open_pos is not None:
-            exit_price = ask_yes if open_pos.side == "BUY_YES" else ask_no
-            if exit_price <= 0:
+            mark_price = ask_yes if open_pos.side == "BUY_YES" else ask_no
+            if mark_price <= 0:
                 continue
 
             entry = float(open_pos.entry_price or 0.0)
-            u_pnl = ((exit_price - entry) / entry) if entry > 0 else 0.0
+            u_pnl = ((mark_price - entry) / entry) if entry > 0 else 0.0
             if open_pos.side == "BUY_NO":
                 # BUY_NO still marks against NO ask directly (same price-space), no inversion needed.
-                u_pnl = ((exit_price - entry) / entry) if entry > 0 else 0.0
+                u_pnl = ((mark_price - entry) / entry) if entry > 0 else 0.0
 
             now_ts = datetime.now(timezone.utc).timestamp()
             end_ts = float(r.get("end_ts") or 0.0)
@@ -1242,9 +1353,9 @@ def run_once(cfg: dict):
             held_s = _seconds_since_iso(open_pos.opened_at)
 
             # Resolve proxy
-            if exit_price >= 0.99:
+            if mark_price >= 0.99:
                 close_reason, close_frac = "resolved_win_proxy", 1.0
-            elif exit_price <= 0.01:
+            elif mark_price <= 0.01:
                 close_reason, close_frac = "resolved_loss_proxy", 1.0
             # hard stops
             elif u_pnl <= -0.25:
@@ -1281,11 +1392,38 @@ def run_once(cfg: dict):
             elif u_pnl >= 0.35 and not bool(getattr(open_pos, "tp35_taken", False)):
                 close_reason, close_frac = "tp_35_half", 0.5
 
+            close_fill_meta = None
+            exit_price = None
+            execution_tag = None
+            if close_frac > 0:
+                order = _build_close_order(open_pos.side, r, cfg)
+                if order.get("mode") == "market" or close_frac < 1.0:
+                    exit_price = float(order.get("taker_price") or 0.0)
+                    execution_tag = "close_market"
+                else:
+                    exit_price, execution_tag, close_fill_meta = _resolve_limit_close(open_pos, close_reason, order, cfg)
+                    if exit_price is None:
+                        append_event(cfg["storage"]["events_path"], {
+                            "type": "paper_trade",
+                            "action": "CLOSE_PENDING",
+                            "reason": close_reason,
+                            "market_id": mid,
+                            "market_name": open_pos.market_name,
+                            "side": open_pos.side,
+                            "model_open": open_pos.model,
+                            "close_execution": order.get("mode"),
+                            "meta": close_fill_meta,
+                        })
+                        continue
+                if exit_price <= 0:
+                    continue
+
             if close_frac > 0:
                 open_pos.close_model = best_model
                 open_pos.close_reason = close_reason
                 open_model_name = str(open_pos.model or "").split(":", 1)[0]
                 if close_frac >= 1.0:
+                    _PENDING_CLOSES.pop(_pos_key(open_pos), None)
                     pnl = close_position(state, open_pos, exit_price)
                     _LAST_CLOSE_TS[mid] = datetime.now(timezone.utc).timestamp()
                     _LAST_CLOSE_REASON[mid] = close_reason
@@ -1422,12 +1560,14 @@ def run_once(cfg: dict):
                     "pnl_usd": round(pnl, 4),
                     "model_open": open_pos.model,
                     "model_close": best_model,
+                    "close_execution": execution_tag,
+                    "close_meta": close_fill_meta,
                     "confidence": conf,
                     "held_edge": round(held_edge, 4),
                     "opp_edge": round(opp_edge, 4),
                 })
                 append_event(cfg["storage"]["events_path"], {"type": "model_stats", "stats": _MODEL_STATS})
-                print(f"[magenta]{'CLOSE' if close_frac>=1 else 'PARTIAL'}[/magenta] {mid} {open_pos.side} reason={close_reason} pnl=${pnl:.2f}")
+                print(f"[magenta]{'CLOSE' if close_frac>=1 else 'PARTIAL'}[/magenta] {mid} {open_pos.side} reason={close_reason} exec={execution_tag} pnl=${pnl:.2f}")
 
     save_state(cfg["storage"]["state_path"], state)
     print(f"[bold]State[/bold] cash=${state.cash_usd:.2f} positions={len(state.positions)} pnl=${state.realized_pnl_usd:.2f}")

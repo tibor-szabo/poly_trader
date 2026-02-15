@@ -10,3 +10,15 @@ data/state.json
 
 # macOS
 .DS_Store
+
+# Secrets/local credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets/
+config/local*.yaml
+
+# Local audit outputs
+.gitleaks-report*.json

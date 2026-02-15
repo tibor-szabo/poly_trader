@@ -38,6 +38,15 @@ scoring:
 
 execution:
   max_exec_sum: 1.02
+  open_mode: "limit_first" # limit_first|market
+  open_limit_improve_ticks: 1
+  open_limit_fallback_taker: true
+  close_mode: "limit_first" # limit_first|market
+  close_limit_improve_ticks: 1
+  close_limit_timeout_s: 20
+  close_limit_reprice_s: 4
+  close_force_taker_reasons: ["hard_stop_25", "resolved_loss_proxy", "flip_stop"]
+  tick_size: 0.001
 
 risk:
   max_notional_per_market_usd: 100

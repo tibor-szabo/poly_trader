@@ -25,6 +25,11 @@ pip install -e .
 python -m polymarket_mvp.main --config config/default.yaml --once
 ```
 
+## Execution style (paper engine)
+- Open: `execution.open_mode=limit_first` by default (with optional taker fallback).
+- Close: `execution.close_mode=limit_first` by default; uses limit repricing, then fallback-to-taker on timeout or emergency reasons.
+- Emergency reasons are configurable via `execution.close_force_taker_reasons`.
+
 ## Structure
 - `src/polymarket_mvp/adapters` data adapters
 - `src/polymarket_mvp/engine` scoring/opportunities
@@ -39,3 +44,7 @@ python -m polymarket_mvp.main --config config/default.yaml --once
 ## Operating Charter
 - Co-founder operating model and legal boundaries: `OPERATING_CHARTER.md`
 - Principle: propose first, execute safely, keep TT in control
+
+## Secret safety
+- Keep credentials only in local `.env` / `config/local*.yaml` (gitignored).
+- Run `scripts/secret_check.sh` before push (requires `gitleaks`).
