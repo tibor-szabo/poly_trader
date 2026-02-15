@@ -913,6 +913,13 @@ def run_once(cfg: dict):
         fb.sort(key=lambda x: (x["ask_sum_with_fees"], -x["depth_usd"]))
         btc_rows.extend(fb[: max(0, target_total - len(btc_rows))])
 
+    # Keep any currently open markets visible so dashboard can mark-to-market PnL.
+    open_market_ids = {str(p.market_id) for p in state.positions if str(getattr(p, "status", "open")) == "open"}
+    for omid in open_market_ids:
+        rr = row_by_market.get(omid)
+        if rr and rr not in btc_rows:
+            btc_rows.append(rr)
+
     # BTC metadata from Polymarket crypto-price endpoint (Chainlink-derived in market UI).
     for r in btc_rows:
         rr = btc_ref_by_id.get(r.get("market_id"))

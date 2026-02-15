@@ -168,6 +168,16 @@ def api_stats(events):
                 bpatched.append(rr)
             latest_groups["bitcoin"] = bpatched
 
+    latest_ticks_by_market = {}
+    for mk, t in latest_ticks.items():
+        latest_ticks_by_market[mk] = {
+            "best_ask_yes": t.get("best_ask_yes"),
+            "best_ask_no": t.get("best_ask_no"),
+            "best_bid_yes": t.get("best_bid_yes"),
+            "best_bid_no": t.get("best_bid_no"),
+            "ws_ts": t.get("ws_ts"),
+        }
+
     return {
         "apiLink": "https://clob.polymarket.com/book",
         "latestDataTs": latest_data.isoformat() if latest_data else None,
@@ -179,6 +189,7 @@ def api_stats(events):
         "latestGroups": latest_groups,
         "latestBtcTick": latest_btc_tick,
         "latestOpportunitySeen": latest_op_seen,
+        "latestTicksByMarket": latest_ticks_by_market,
     }
 
 

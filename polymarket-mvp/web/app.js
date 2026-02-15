@@ -179,6 +179,15 @@ function render(d) {
   const secondary = hasGroups ? (groups.secondary || []) : [];
   const btcSignal = updateBtcSignal(top);
   const priceByMarket = {};
+  const wsTicks = s.latestTicksByMarket || {};
+  for (const mid of Object.keys(wsTicks)) {
+    const t = wsTicks[mid] || {};
+    const y = Number(t.best_ask_yes ?? NaN);
+    const n = Number(t.best_ask_no ?? NaN);
+    if (Number.isFinite(y) && Number.isFinite(n)) {
+      priceByMarket[String(mid)] = { yes: y, no: n };
+    }
+  }
   for (const r of top) {
     const mid = String(r.market_id || '');
     if (!mid) continue;
