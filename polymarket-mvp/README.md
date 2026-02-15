@@ -48,3 +48,13 @@ python -m polymarket_mvp.main --config config/default.yaml --once
 ## Secret safety
 - Keep credentials only in local `.env` / `config/local*.yaml` (gitignored).
 - Run `scripts/secret_check.sh` before push (requires `gitleaks`).
+
+## Live trading (gated)
+- Keep `app.mode: paper` by default.
+- To enable live routing: set `app.mode: live` and `live.enabled: true`.
+- Install signer client locally: `pip install py-clob-client`.
+- Required local env vars (never commit):
+  - `POLYMARKET_PRIVATE_KEY`
+  - optional `POLYMARKET_FUNDER`
+  - optional API creds (`POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`)
+- Use `live.dry_run: true` first to validate order paths without sending real orders.

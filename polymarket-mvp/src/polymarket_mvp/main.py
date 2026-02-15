@@ -18,6 +18,7 @@ from polymarket_mvp.adapters.gamma import GammaAdapter
 from polymarket_mvp.ops_intel import build_market_radar, build_inefficiency_report, build_flow_watch
 from polymarket_mvp.ws_hook import ClobWsHook
 from polymarket_mvp.rtds_hook import BtcRtdsHook
+from polymarket_mvp.execution.live import LiveExecutor
 
 
 _WS_HOOK = None
@@ -51,6 +52,7 @@ _MARKET_LOCK_UNTIL = {}
 _GLOBAL_OPEN_PAUSE_UNTIL = 0.0
 _RECENT_FLIP_STOP_LOSS_TS = []
 _PENDING_CLOSES = {}
+_LIVE_EXECUTOR = None
 
 
 def _pos_key(pos) -> str:
@@ -139,6 +141,13 @@ def _resolve_limit_close(pos, close_reason: str, order: dict, cfg: dict):
         "best_bid": bid,
         "best_ask": ask,
     }
+
+
+def _ensure_live_executor(cfg: dict) -> LiveExecutor:
+    global _LIVE_EXECUTOR
+    if _LIVE_EXECUTOR is None:
+        _LIVE_EXECUTOR = LiveExecutor(cfg)
+    return _LIVE_EXECUTOR
 
 
 def _ensure_ws_hook() -> ClobWsHook:
@@ -847,6 +856,7 @@ def run_once(cfg: dict):
     # BTC group policy: always show the next 3 resolving BTC markets.
     now_dt = datetime.now(timezone.utc)
     btc_ref_by_id = {r.market_id: r for r in btc_refs}
+    token_ids_by_market = {r.market_id: {"BUY_YES": r.yes_token, "BUY_NO": r.no_token} for r in btc_refs}
     btc_candidates = []
     for mid in btc_ids:
         if mid not in row_by_market:
@@ -1086,7 +1096,10 @@ def run_once(cfg: dict):
             f"sum={ask_sum_no_fees:.3f} sum_fee={ask_sum_with_fees:.3f} sig={signal} | {short}"
         )
 
-    # Model-driven BTC paper trading simulation.
+    # Model-driven BTC paper trading simulation / live bridge.
+    app_mode = str(cfg.get("app", {}).get("mode", "paper")).lower()
+    live_exec = _ensure_live_executor(cfg)
+    live_enabled = app_mode == "live" and bool(cfg.get("live", {}).get("enabled", False))
     strategy_cfg = cfg.get("strategy", {})
     trade_cap = float(strategy_cfg.get("trade_cap_usd", 100.0))
     max_trade_cash_fraction = float(strategy_cfg.get("max_trade_cash_fraction", 0.10))
@@ -1289,6 +1302,35 @@ def run_once(cfg: dict):
             size_usd = min(trade_cap * size_mul, per_trade_cash_cap, cash_now)
             model_tag = (f"SCALP:{impulse.get('source','src')}:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
             if entry > 0 and size_usd >= 1.0:
+                live_open = None
+                if live_enabled:
+                    tok = (token_ids_by_market.get(mid) or {}).get(side)
+                    qty = (size_usd / entry) if entry > 0 else 0.0
+                    live_open = live_exec.place(
+                        token_id=str(tok or ""),
+                        side="BUY",
+                        price=float(entry),
+                        size=float(qty),
+                        post_only=open_exec in {"open_limit_fill", "open_limit_pending_skip"},
+                    )
+                    append_event(cfg["storage"]["events_path"], {
+                        "type": "live_trade",
+                        "action": "OPEN_SUBMIT",
+                        "market_id": mid,
+                        "market_name": str(r.get("market_name") or mid),
+                        "token_id": tok,
+                        "side": side,
+                        "price": round(float(entry), 4),
+                        "qty": round(float(qty), 6),
+                        "open_execution": open_exec,
+                        "ok": bool(live_open.ok),
+                        "order_id": live_open.order_id,
+                        "error": live_open.error,
+                    })
+                    if not live_open.ok:
+                        print(f"[red]LIVE OPEN FAILED[/red] {mid} {side} err={live_open.error}")
+                        continue
+
                 pos = open_position(
                     state,
                     market_id=mid,
@@ -1312,6 +1354,7 @@ def run_once(cfg: dict):
                     "opened_at": pos.opened_at,
                     "model": model_tag,
                     "open_execution": open_exec,
+                    "live_order_id": (live_open.order_id if live_open else None),
                     "confidence": conf,
                     "consensus": consensus,
                     "winner_side": winner_side,
@@ -1419,6 +1462,36 @@ def run_once(cfg: dict):
                     continue
 
             if close_frac > 0:
+                live_close = None
+                if live_enabled:
+                    tok = (token_ids_by_market.get(mid) or {}).get(open_pos.side)
+                    qty_close = float(open_pos.qty) * float(close_frac)
+                    live_close = live_exec.place(
+                        token_id=str(tok or ""),
+                        side="SELL",
+                        price=float(exit_price),
+                        size=float(qty_close),
+                        post_only=(execution_tag in {"close_limit_fill"}),
+                    )
+                    append_event(cfg["storage"]["events_path"], {
+                        "type": "live_trade",
+                        "action": "CLOSE_SUBMIT" if close_frac >= 1.0 else "PARTIAL_CLOSE_SUBMIT",
+                        "reason": close_reason,
+                        "market_id": mid,
+                        "market_name": open_pos.market_name,
+                        "token_id": tok,
+                        "side": open_pos.side,
+                        "price": round(float(exit_price), 4),
+                        "qty": round(float(qty_close), 6),
+                        "close_execution": execution_tag,
+                        "ok": bool(live_close.ok),
+                        "order_id": live_close.order_id,
+                        "error": live_close.error,
+                    })
+                    if not live_close.ok:
+                        print(f"[red]LIVE CLOSE FAILED[/red] {mid} {open_pos.side} err={live_close.error}")
+                        continue
+
                 open_pos.close_model = best_model
                 open_pos.close_reason = close_reason
                 open_model_name = str(open_pos.model or "").split(":", 1)[0]
@@ -1562,6 +1635,7 @@ def run_once(cfg: dict):
                     "model_close": best_model,
                     "close_execution": execution_tag,
                     "close_meta": close_fill_meta,
+                    "live_order_id": (live_close.order_id if live_close else None),
                     "confidence": conf,
                     "held_edge": round(held_edge, 4),
                     "opp_edge": round(opp_edge, 4),

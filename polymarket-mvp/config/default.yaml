@@ -1,5 +1,5 @@
 app:
-  mode: paper
+  mode: paper # paper|live
   loop_seconds: 1
   event_driven: true
   min_cycle_seconds: 0.2
@@ -88,3 +88,12 @@ strategy:
 storage:
   state_path: "data/state.json"
   events_path: "data/events.jsonl"
+
+
+live:
+  enabled: false
+  dry_run: true
+  clob_host: "https://clob.polymarket.com"
+  chain_id: 137
+  signature_type: 1
+  order_type: "GTC"

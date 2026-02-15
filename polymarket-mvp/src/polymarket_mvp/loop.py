@@ -7,8 +7,9 @@ from polymarket_mvp.utils.storage import save_state
 
 def run_forever(config_path: str):
     cfg = load_config(config_path)
-    # Simulation reset on every process restart.
-    save_state(cfg["storage"]["state_path"], init_state(cfg))
+    # Reset ledger on restart only in paper mode.
+    if str(cfg.get("app", {}).get("mode", "paper")).lower() == "paper":
+        save_state(cfg["storage"]["state_path"], init_state(cfg))
     interval = float(cfg.get("app", {}).get("loop_seconds", 15))
     event_driven = bool(cfg.get("app", {}).get("event_driven", True))
     use_ws = bool(cfg.get("data", {}).get("use_clob_ws", True))
