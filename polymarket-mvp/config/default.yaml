@@ -82,6 +82,8 @@ strategy:
   scalp_min_impulse_bps: 9.0
   scalp_buy_yes_min_impulse_bps: 12.0
   scalp_buy_no_min_impulse_bps: 9.0
+  min_entry_price: 0.04
+  max_entry_price: 0.96
   normal_open_min_winner_stability: 0.18
   normal_open_buy_yes_min_winner_stability: 0.30
   normal_open_max_opposing_impulse_bps: 2.5

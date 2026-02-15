@@ -1168,6 +1168,8 @@ def run_once(cfg: dict):
     scalp_min_impulse_bps = float(strategy_cfg.get("scalp_min_impulse_bps", 9.0))
     scalp_buy_yes_min_impulse_bps = float(strategy_cfg.get("scalp_buy_yes_min_impulse_bps", scalp_min_impulse_bps))
     scalp_buy_no_min_impulse_bps = float(strategy_cfg.get("scalp_buy_no_min_impulse_bps", scalp_min_impulse_bps))
+    min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
+    max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
 
     impulse_source = str(strategy_cfg.get("impulse_source", "binance")).lower()
@@ -1343,6 +1345,21 @@ def run_once(cfg: dict):
             per_trade_cash_cap = max(1.0, cash_now * max_trade_cash_fraction)
             size_usd = min(trade_cap * size_mul, per_trade_cash_cap, cash_now)
             model_tag = (f"SCALP:{impulse.get('source','src')}:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
+            entry_price_ok = (entry >= min_entry_price) and (entry <= max_entry_price)
+            if (entry > 0) and (not entry_price_ok):
+                append_event(cfg["storage"]["events_path"], {
+                    "type": "market_guardrail",
+                    "market_id": mid,
+                    "reason": "entry_price_out_of_bounds",
+                    "side": side,
+                    "entry_price": round(float(entry), 4),
+                    "min_entry_price": round(float(min_entry_price), 4),
+                    "max_entry_price": round(float(max_entry_price), 4),
+                    "confidence": conf,
+                    "consensus": consensus,
+                    "model": model_tag,
+                })
+                continue
             if entry > 0 and size_usd >= 1.0:
                 live_open = None
                 if live_enabled:
