@@ -94,6 +94,7 @@ def api_stats(events):
     latest_op_seen = None
     latest_groups = None
     latest_btc_tick = None
+    latest_divergence = None
     latest_ticks = {}
     for e in reversed(events):
         if e.get("type") in ("opportunity_seen", "ws_opportunity_seen") and latest_op_seen is None:
@@ -102,6 +103,8 @@ def api_stats(events):
             latest_groups = e
         if e.get("type") == "btc_price_tick" and latest_btc_tick is None:
             latest_btc_tick = e
+        if e.get("type") == "timeframe_divergence" and latest_divergence is None:
+            latest_divergence = e
         if e.get("type") == "ws_market_tick":
             mk = str(e.get("market_id", ""))
             if mk and mk not in latest_ticks:
@@ -189,6 +192,7 @@ def api_stats(events):
         "latestGroups": latest_groups,
         "latestBtcTick": latest_btc_tick,
         "latestOpportunitySeen": latest_op_seen,
+        "latestTimeframeDivergence": latest_divergence,
         "latestTicksByMarket": latest_ticks_by_market,
     }
 

@@ -1003,6 +1003,68 @@ def run_once(cfg: dict):
     # Display only BTC markets with known target to avoid misleading blanks.
     btc_rows = [r for r in btc_rows if r.get("btc_target") is not None]
 
+    # Statistical relative-value scanner: 15m vs 5m implied-prob divergence.
+    # Not risk-free arb; this flags unusually large dislocations only.
+    strat_cfg_div = cfg.get("strategy", {})
+    div_min = float(strat_cfg_div.get("tf_divergence_min", 0.12))
+    fee_buffer = float(strat_cfg_div.get("tf_divergence_fee_buffer", 0.02))
+    rows_15m = [r for r in btc_rows if _tf_bucket(r) == "15m" and r.get("p_yes_model") is not None]
+    rows_5m = [r for r in btc_rows if _tf_bucket(r) == "5m" and r.get("p_yes_model") is not None]
+    div_items = []
+    for r5 in rows_5m:
+        e5 = float(r5.get("end_ts") or 0.0)
+        if e5 <= 0:
+            continue
+        best = None
+        best_dt = 1e18
+        for r15 in rows_15m:
+            e15 = float(r15.get("end_ts") or 0.0)
+            if e15 <= 0:
+                continue
+            dt = abs(e15 - e5)
+            if dt < best_dt:
+                best_dt = dt
+                best = r15
+        if not best:
+            continue
+
+        p5 = float(r5.get("p_yes_model") or 0.5)
+        p15 = float(best.get("p_yes_model") or 0.5)
+        div = p5 - p15
+        abs_div = abs(div)
+        if abs_div < div_min:
+            continue
+
+        edge_est = abs_div - fee_buffer
+        if edge_est <= 0:
+            continue
+
+        # Positive div => 5m implies more YES than 15m context.
+        suggestion = "LONG_5M_NO__LONG_15M_YES" if div > 0 else "LONG_5M_YES__LONG_15M_NO"
+        div_items.append({
+            "market_5m": r5.get("market_id"),
+            "market_15m": best.get("market_id"),
+            "name_5m": r5.get("market_name"),
+            "name_15m": best.get("market_name"),
+            "p_yes_5m": round(p5, 4),
+            "p_yes_15m": round(p15, 4),
+            "divergence": round(div, 4),
+            "abs_divergence": round(abs_div, 4),
+            "edge_est": round(edge_est, 4),
+            "suggestion": suggestion,
+            "end_gap_s": int(best_dt),
+        })
+
+    div_items.sort(key=lambda x: float(x.get("edge_est") or 0.0), reverse=True)
+    append_event(cfg["storage"]["events_path"], {
+        "type": "timeframe_divergence",
+        "enabled": True,
+        "min_divergence": div_min,
+        "fee_buffer": fee_buffer,
+        "count": len(div_items),
+        "top": div_items[:5],
+    })
+
     alt_ref_by_id = {r.market_id: r for r in alt_refs}
     alt_rows = [row_by_market[m] for m in alt_ids if m in row_by_market]
 

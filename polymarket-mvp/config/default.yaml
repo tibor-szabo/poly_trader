@@ -86,6 +86,8 @@ strategy:
   min_entry_price: 0.04
   max_entry_price: 0.96
   hard_stop_pct: -0.15
+  tf_divergence_min: 0.12
+  tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.25
   normal_open_buy_yes_min_winner_stability: 0.40
   normal_open_max_opposing_impulse_bps: 1.5

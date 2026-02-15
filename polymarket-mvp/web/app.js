@@ -198,9 +198,18 @@ function render(d) {
     }
   }
   if (secondaryMeta) {
-    secondaryMeta.textContent = hasGroups
+    const baseTxt = hasGroups
       ? (groups.secondary_note || 'Auto-selected by liquidity + spread quality.')
       : 'Waiting for grouped market snapshot...';
+    const div = s.latestTimeframeDivergence || {};
+    const top = (div.top || [])[0] || null;
+    let divTxt = '';
+    if (top) {
+      divTxt = ` | 15m↔5m RV: ${top.suggestion} edge≈${top.edge_est} div=${top.divergence}`;
+    } else if (div.enabled) {
+      divTxt = ' | 15m↔5m RV: no active divergence signal';
+    }
+    secondaryMeta.textContent = `${baseTxt}${divTxt}`;
   }
 
   for (const x of top) {
