@@ -29,7 +29,6 @@ data:
   focus_slugs: []
   focus_slug_prefixes:
     - "btc-updown-15m-"
-    - "btc-updown-5m-"
 
 scoring:
   min_edge_bps: 20
