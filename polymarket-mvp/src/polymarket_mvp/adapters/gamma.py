@@ -146,24 +146,38 @@ class GammaAdapter:
         refs.sort(key=_end_ts, reverse=True)
         return refs
 
-    def fetch_market_refs_by_generated_15m_slugs(self, prefixes: list[str], windows: int = 8) -> List[GammaMarketRef]:
-        # Generate rolling slugs like btc-updown-15m-<unix_ts> around current 15m bucket.
-        # This avoids relying on broad list endpoints that may omit short-lived markets.
+    def fetch_market_refs_by_generated_timeframe_slugs(
+        self,
+        prefixes: list[str],
+        timeframe: str,
+        bucket_seconds: int,
+        windows: int = 8,
+        lookback_windows: int = 8,
+    ) -> List[GammaMarketRef]:
+        # Generate rolling slugs like btc-updown-15m-<unix_ts> / btc-updown-5m-<unix_ts>.
         if not prefixes:
             return []
 
         now = int(datetime.now(timezone.utc).timestamp())
-        base = (now // 900) * 900  # 15-minute bucket
-        # Only probe current/future 15m buckets; past buckets often remain queryable
-        # via slug and can pollute discovery with expired markets.
-        ts_candidates = [base + 900 * k for k in range(-8, windows + 1)]
+        base = (now // int(bucket_seconds)) * int(bucket_seconds)
+        ts_candidates = [base + int(bucket_seconds) * k for k in range(-int(lookback_windows), int(windows) + 1)]
 
         slugs: list[str] = []
+        tf = (timeframe or "").lower()
         for p in prefixes:
             lp = (p or "").lower()
-            if "15m" not in lp:
+            if tf not in lp:
                 continue
             for t in ts_candidates:
                 slugs.append(f"{p}{t}")
 
         return self.fetch_market_refs_by_slugs(slugs)
+
+    def fetch_market_refs_by_generated_15m_slugs(self, prefixes: list[str], windows: int = 8) -> List[GammaMarketRef]:
+        return self.fetch_market_refs_by_generated_timeframe_slugs(
+            prefixes=prefixes,
+            timeframe="15m",
+            bucket_seconds=900,
+            windows=windows,
+            lookback_windows=8,
+        )

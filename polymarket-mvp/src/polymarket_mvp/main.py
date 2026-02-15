@@ -597,7 +597,15 @@ def run_once(cfg: dict):
             active_only=True,
         )
         # Slightly wider rolling window to reduce discovery gaps around 15m rollovers.
-        generated_refs = gamma.fetch_market_refs_by_generated_15m_slugs(prefixes, windows=16)
+        generated_refs_15m = gamma.fetch_market_refs_by_generated_15m_slugs(prefixes, windows=16)
+        generated_refs_5m = gamma.fetch_market_refs_by_generated_timeframe_slugs(
+            prefixes,
+            timeframe="5m",
+            bucket_seconds=300,
+            windows=24,
+            lookback_windows=24,
+        )
+        generated_refs = generated_refs_15m + generated_refs_5m
         by_id = {r.market_id: r for r in refs}
         for r in slug_refs + prefix_refs + generated_refs:
             by_id[r.market_id] = r
@@ -872,11 +880,38 @@ def run_once(cfg: dict):
         btc_candidates.append((dt, row_by_market[mid]))
 
     btc_candidates.sort(key=lambda x: x[0])
-    btc_rows = [x[1] for x in btc_candidates[:3]]
-    if len(btc_rows) < 3:
+
+    def _tf_bucket(rr: dict) -> str:
+        slug = str(rr.get("slug") or "").lower()
+        q = str(rr.get("question") or "").lower()
+        if "5m" in slug or "5 minute" in q or "5-minute" in q:
+            return "5m"
+        if "15m" in slug or "15 min" in q or "15-minute" in q:
+            return "15m"
+        return "other"
+
+    btc_rows = []
+    # Primary monitor set: latest 3x 15m + latest 1x 5m (if available).
+    rows_15 = [row for _dt, row in btc_candidates if _tf_bucket(row) == "15m"]
+    rows_5 = [row for _dt, row in btc_candidates if _tf_bucket(row) == "5m"]
+    btc_rows.extend(rows_15[:3])
+    if rows_5:
+        btc_rows.append(rows_5[0])
+
+    # Fill remaining slots from nearest-expiry BTC rows.
+    target_total = 4
+    if len(btc_rows) < target_total:
+        for _dt, row in btc_candidates:
+            if row in btc_rows:
+                continue
+            btc_rows.append(row)
+            if len(btc_rows) >= target_total:
+                break
+
+    if len(btc_rows) < target_total:
         fb = [row_by_market[m] for m in btc_ids if m in row_by_market and row_by_market[m] not in btc_rows]
         fb.sort(key=lambda x: (x["ask_sum_with_fees"], -x["depth_usd"]))
-        btc_rows.extend(fb[: max(0, 3 - len(btc_rows))])
+        btc_rows.extend(fb[: max(0, target_total - len(btc_rows))])
 
     # BTC metadata from Polymarket crypto-price endpoint (Chainlink-derived in market UI).
     for r in btc_rows:
