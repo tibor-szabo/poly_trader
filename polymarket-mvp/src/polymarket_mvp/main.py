@@ -1212,6 +1212,8 @@ def run_once(cfg: dict):
     base_reentry_cooldown_s = float(strategy_cfg.get("base_reentry_cooldown_s", 120.0))
     flip_reentry_cooldown_s = float(strategy_cfg.get("flip_reentry_cooldown_s", 240.0))
     min_hold_for_flip_exit_s = float(strategy_cfg.get("min_hold_for_flip_exit_s", 20.0))
+    min_hold_for_flip_stop_s = float(strategy_cfg.get("min_hold_for_flip_stop_s", 0.0))
+    min_time_left_for_entry_s = float(strategy_cfg.get("min_time_left_for_entry_s", 90.0))
     flip_signal_conf_min = int(strategy_cfg.get("flip_signal_conf_min", 62))
     flip_stop_loss_pct = float(strategy_cfg.get("flip_stop_loss_pct", -0.12))
     buy_no_flip_stop_loss_pct = float(strategy_cfg.get("buy_no_flip_stop_loss_pct", -0.10))
@@ -1381,11 +1383,11 @@ def run_once(cfg: dict):
             or (open_side == "BUY_NO" and impulse_bps >= abs(normal_open_max_opposing_impulse_bps))
         )
 
-        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block) and (not low_stability_block) and (not low_model_side_stability_block) and (not impulse_against_open)
+        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and t_left_s >= min_time_left_for_entry_s and (not late_contrarian_block) and (not low_stability_block) and (not low_model_side_stability_block) and (not impulse_against_open)
 
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
         scalp_impulse_req = scalp_buy_yes_min_impulse_bps if impulse_side == "BUY_YES" else scalp_buy_no_min_impulse_bps
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_s >= 75
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_s >= max(75.0, min_time_left_for_entry_s)
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
@@ -1537,7 +1539,7 @@ def run_once(cfg: dict):
             # hard stops
             elif u_pnl <= hard_stop_pct:
                 close_reason, close_frac = "hard_stop_25", 1.0
-            elif flip and u_pnl <= (buy_no_flip_stop_loss_pct if open_pos.side == "BUY_NO" else flip_stop_loss_pct):
+            elif flip and held_s >= min_hold_for_flip_stop_s and u_pnl <= (buy_no_flip_stop_loss_pct if open_pos.side == "BUY_NO" else flip_stop_loss_pct):
                 close_reason, close_frac = "flip_stop", 1.0
             # Fast scalp exits: enter on impulse, exit quickly after PM reaction.
             elif str(open_pos.model or "").startswith("SCALP:") and u_pnl >= 0.02:

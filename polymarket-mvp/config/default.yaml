@@ -65,6 +65,8 @@ strategy:
   base_reentry_cooldown_s: 240
   flip_reentry_cooldown_s: 600
   min_hold_for_flip_exit_s: 90
+  min_hold_for_flip_stop_s: 45
+  min_time_left_for_entry_s: 120
   flip_signal_conf_min: 68
   flip_stop_loss_pct: -0.06
   buy_no_flip_stop_loss_pct: -0.10
