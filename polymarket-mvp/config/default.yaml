@@ -46,7 +46,7 @@ execution:
   close_limit_improve_ticks: 1
   close_limit_timeout_s: 20
   close_limit_reprice_s: 4
-  close_force_taker_reasons: ["hard_stop_25", "resolved_loss_proxy", "flip_stop"]
+  close_force_taker_reasons: ["hard_stop_25", "resolved_loss_proxy"]
   tick_size: 0.001
 
 risk:
@@ -61,8 +61,8 @@ paper:
 strategy:
   impulse_source: "binance"  # binance|coinbase|kraken|bybit
   trade_cap_usd: 100
-  max_trade_cash_fraction: 0.07
-  max_open_positions: 2
+  max_trade_cash_fraction: 0.04
+  max_open_positions: 1
   base_reentry_cooldown_s: 240
   flip_reentry_cooldown_s: 600
   min_hold_for_flip_exit_s: 90
@@ -73,20 +73,22 @@ strategy:
   global_flip_stop_pause_seconds: 180
   global_flip_stop_window_seconds: 1200
   global_flip_stop_trigger_count: 1
-  buy_yes_conf_floor: 60
-  buy_yes_consensus_floor: 6
+  buy_yes_conf_floor: 66
+  buy_yes_consensus_floor: 7
   buy_yes_reentry_cooldown_mult: 1.9
-  buy_no_conf_floor: 54
-  buy_no_consensus_floor: 5
+  buy_no_conf_floor: 58
+  buy_no_consensus_floor: 6
   buy_no_reentry_cooldown_mult: 1.45
   scalp_min_impulse_bps: 9.0
-  scalp_buy_yes_min_impulse_bps: 12.0
-  scalp_buy_no_min_impulse_bps: 9.0
+  scalp_buy_yes_min_impulse_bps: 14.0
+  scalp_buy_no_min_impulse_bps: 11.0
+  scalp_min_edge: 0.03
   min_entry_price: 0.04
   max_entry_price: 0.96
-  normal_open_min_winner_stability: 0.18
-  normal_open_buy_yes_min_winner_stability: 0.30
-  normal_open_max_opposing_impulse_bps: 2.5
+  hard_stop_pct: -0.15
+  normal_open_min_winner_stability: 0.25
+  normal_open_buy_yes_min_winner_stability: 0.40
+  normal_open_max_opposing_impulse_bps: 1.5
 
 storage:
   state_path: "data/state.json"

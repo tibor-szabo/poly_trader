@@ -1168,6 +1168,8 @@ def run_once(cfg: dict):
     scalp_min_impulse_bps = float(strategy_cfg.get("scalp_min_impulse_bps", 9.0))
     scalp_buy_yes_min_impulse_bps = float(strategy_cfg.get("scalp_buy_yes_min_impulse_bps", scalp_min_impulse_bps))
     scalp_buy_no_min_impulse_bps = float(strategy_cfg.get("scalp_buy_no_min_impulse_bps", scalp_min_impulse_bps))
+    scalp_min_edge = float(strategy_cfg.get("scalp_min_edge", 0.03))
+    hard_stop_pct = float(strategy_cfg.get("hard_stop_pct", -0.15))
     min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
     max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
@@ -1311,7 +1313,7 @@ def run_once(cfg: dict):
 
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
         scalp_impulse_req = scalp_buy_yes_min_impulse_bps if impulse_side == "BUY_YES" else scalp_buy_no_min_impulse_bps
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= 0.02 and len(open_map) < max_open_positions and cool_ok and t_left_s >= 75
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_s >= 75
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
@@ -1460,7 +1462,7 @@ def run_once(cfg: dict):
             elif mark_price <= 0.01:
                 close_reason, close_frac = "resolved_loss_proxy", 1.0
             # hard stops
-            elif u_pnl <= -0.25:
+            elif u_pnl <= hard_stop_pct:
                 close_reason, close_frac = "hard_stop_25", 1.0
             elif flip and u_pnl <= (buy_no_flip_stop_loss_pct if open_pos.side == "BUY_NO" else flip_stop_loss_pct):
                 close_reason, close_frac = "flip_stop", 1.0
