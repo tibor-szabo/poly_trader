@@ -89,6 +89,9 @@ strategy:
   tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.22
   normal_open_buy_yes_min_winner_stability: 0.35
+  model_side_stability_window: 8
+  model_side_stability_min: 0.55
+  model_side_stability_buy_yes_min: 0.75
   normal_open_max_opposing_impulse_bps: 2.0
 
 storage:

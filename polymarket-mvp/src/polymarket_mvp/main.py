@@ -45,6 +45,7 @@ _LAST_CLOSE_SIDE = {}
 _LAST_CLOSE_PNL = {}
 _EDGE_HIST = {}
 _WINNER_HIST = {}
+_MODEL_SIDE_HIST = {}
 _PRICE_SRC_HIST = {"binance": [], "coinbase": [], "kraken": [], "bybit": []}
 _PRICE_SRC_LAST = {"coinbase": 0.0, "kraken": 0.0, "bybit": 0.0}
 _FLIP_FAIL_STREAK = {}
@@ -1221,6 +1222,9 @@ def run_once(cfg: dict):
     normal_open_min_winner_stability = float(strategy_cfg.get("normal_open_min_winner_stability", 0.12))
     normal_open_buy_yes_min_winner_stability = float(strategy_cfg.get("normal_open_buy_yes_min_winner_stability", 0.30))
     normal_open_max_opposing_impulse_bps = float(strategy_cfg.get("normal_open_max_opposing_impulse_bps", 3.0))
+    model_side_stability_window = int(strategy_cfg.get("model_side_stability_window", 8))
+    model_side_stability_min = float(strategy_cfg.get("model_side_stability_min", 0.55))
+    model_side_stability_buy_yes_min = float(strategy_cfg.get("model_side_stability_buy_yes_min", 0.70))
     buy_yes_conf_floor = int(strategy_cfg.get("buy_yes_conf_floor", 52))
     buy_yes_consensus_floor = int(strategy_cfg.get("buy_yes_consensus_floor", 4))
     buy_yes_reentry_cooldown_mult = float(strategy_cfg.get("buy_yes_reentry_cooldown_mult", 1.20))
@@ -1277,9 +1281,12 @@ def run_once(cfg: dict):
         p_hit = float(r.get("p_hit_target") or 0.5)
         _history_push(_EDGE_HIST, mid, {"ey": edge_yes, "en": edge_no})
         _history_push(_WINNER_HIST, mid, winner_side)
+        _history_push(_MODEL_SIDE_HIST, mid, side, maxlen=max(3, model_side_stability_window))
 
         wh = _WINNER_HIST.get(mid, [])
         winner_stability = (sum(1 for x in wh if x == winner_side) / len(wh)) if wh else 0.0
+        model_hist = _MODEL_SIDE_HIST.get(mid, [])
+        model_side_stability = (sum(1 for x in model_hist if x == side) / len(model_hist)) if model_hist else 0.0
 
         # Reversal only when model disagrees, target hit chance is weak, and winner is unstable.
         reversal_belief = ((winner_side == "BUY_YES" and p_yes < 0.42) or (winner_side == "BUY_NO" and p_yes > 0.58)) and (p_hit < 0.45) and (winner_stability < 0.65)
@@ -1292,6 +1299,7 @@ def run_once(cfg: dict):
             "distance_bps": round(dist_bps, 2),
             "reversal_belief": bool(reversal_belief),
             "winner_stability": round(winner_stability, 3),
+            "model_side_stability": round(model_side_stability, 3),
             "p_hit_target": round(p_hit, 4),
             "confidence": conf,
             "consensus": consensus,
@@ -1366,12 +1374,14 @@ def run_once(cfg: dict):
         late_contrarian_block = (t_left_s < 240) and (winner_stability >= 0.70) and (open_side != winner_side)
         min_stability_floor = normal_open_buy_yes_min_winner_stability if open_side == "BUY_YES" else normal_open_min_winner_stability
         low_stability_block = winner_stability < min_stability_floor
+        model_side_stability_floor = model_side_stability_buy_yes_min if open_side == "BUY_YES" else model_side_stability_min
+        low_model_side_stability_block = model_side_stability < model_side_stability_floor
         impulse_against_open = (
             (open_side == "BUY_YES" and impulse_bps <= -abs(normal_open_max_opposing_impulse_bps))
             or (open_side == "BUY_NO" and impulse_bps >= abs(normal_open_max_opposing_impulse_bps))
         )
 
-        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block) and (not low_stability_block) and (not impulse_against_open)
+        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and (not late_contrarian_block) and (not low_stability_block) and (not low_model_side_stability_block) and (not impulse_against_open)
 
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
         scalp_impulse_req = scalp_buy_yes_min_impulse_bps if impulse_side == "BUY_YES" else scalp_buy_no_min_impulse_bps
@@ -1482,6 +1492,7 @@ def run_once(cfg: dict):
                     "consensus": consensus,
                     "winner_side": winner_side,
                     "winner_stability": round(winner_stability, 3),
+                    "model_side_stability": round(model_side_stability, 3),
                     "p_hit_target": round(p_hit, 4),
                     "impulse_bps_3s": round(impulse_bps, 2),
                     "edge_yes": round(edge_yes, 4),
