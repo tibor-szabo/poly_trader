@@ -963,8 +963,10 @@ def run_once(cfg: dict):
     btc_candidates.sort(key=lambda x: x[0])
 
     def _tf_bucket(rr: dict) -> str:
-        slug = str(rr.get("slug") or "").lower()
-        q = str(rr.get("question") or "").lower()
+        mid = str(rr.get("market_id") or "")
+        ref = btc_ref_by_id.get(mid)
+        slug = str((rr.get("slug") if rr.get("slug") else (getattr(ref, "slug", ""))) or "").lower()
+        q = str((rr.get("question") if rr.get("question") else (getattr(ref, "question", ""))) or "").lower()
         if "5m" in slug or "5 minute" in q or "5-minute" in q:
             return "5m"
         if "15m" in slug or "15 min" in q or "15-minute" in q:
@@ -1013,7 +1015,9 @@ def run_once(cfg: dict):
                 if _ed.tzinfo is None:
                     _ed = _ed.replace(tzinfo=timezone.utc)
                 st = (_ed - timedelta(minutes=15)).isoformat()
-        target_px, current_px = _polymarket_btc_prices(st, ed, variant="fifteen")
+        tfv = _tf_bucket(r)
+        variant = "five" if tfv == "5m" else "fifteen"
+        target_px, current_px = _polymarket_btc_prices(st, ed, variant=variant)
         chainlink_live, binance_live = _btc_live_prices()
         if current_px is None:
             current_px = chainlink_live if chainlink_live is not None else binance_live
@@ -1102,8 +1106,8 @@ def run_once(cfg: dict):
         r["edge_yes"] = round(p_yes - float(r.get("best_ask_yes") or 0.0), 4)
         r["edge_no"] = round((1.0 - p_yes) - float(r.get("best_ask_no") or 0.0), 4)
 
-    # Display only BTC markets with known target to avoid misleading blanks.
-    btc_rows = [r for r in btc_rows if r.get("btc_target") is not None]
+    # Keep both 15m and 5m rows visible; some 5m markets may temporarily miss target metadata.
+    # (We still compute target fallbacks when possible.)
 
     # Statistical relative-value scanner: 15m vs 5m implied-prob divergence.
     # Not risk-free arb; this flags unusually large dislocations only.
