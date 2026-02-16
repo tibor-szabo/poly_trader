@@ -942,6 +942,42 @@ def run_once(cfg: dict):
             "quality_score": round(quality_score, 2),
         }
 
+    # 5m rescue: if REST snapshot misses a 5m BTC market, synthesize row from WS best asks.
+    # This keeps latest 5m visible in primary group instead of disappearing.
+    if use_ws and ws_hook:
+        for rr in btc_refs:
+            mid = str(rr.market_id)
+            if mid in row_by_market:
+                continue
+            slug_l = str(getattr(rr, "slug", "") or "").lower()
+            if "5m" not in slug_l:
+                continue
+            yb, ya = ws_hook.get_best(rr.yes_token)
+            nb, na = ws_hook.get_best(rr.no_token)
+            if not (ya and na and ya > 0 and na > 0):
+                continue
+            by = float(yb or 0.0)
+            bn = float(nb or 0.0)
+            ask_sum_no_fees = float(ya) + float(na)
+            ask_sum_with_fees = ask_sum_no_fees + ((fee_bps + slippage_bps) / 10000.0)
+            signal = "OPPORTUNITY" if ask_sum_with_fees < 1.0 else ("WATCH" if ask_sum_no_fees < 1.0 else "NO_OPPORTUNITY")
+            spread_penalty = max(0.0, float(ya) - by) + max(0.0, float(na) - bn)
+            quality_score = 0.0 if spread_penalty <= 0 else round(1.0 / spread_penalty, 2)
+            row_by_market[mid] = {
+                "market_id": mid,
+                "market_name": str(getattr(rr, "question", "") or mid),
+                "best_bid_yes": round(by, 4),
+                "best_bid_no": round(bn, 4),
+                "best_ask_yes": round(float(ya), 4),
+                "best_ask_no": round(float(na), 4),
+                "ask_sum_no_fees": round(ask_sum_no_fees, 4),
+                "ask_sum_with_fees": round(ask_sum_with_fees, 4),
+                "signal": signal,
+                "depth_usd": 0.0,
+                "spread_sum": round(spread_penalty, 4),
+                "quality_score": quality_score,
+            }
+
     # BTC group policy: always show the next 3 resolving BTC markets.
     now_dt = datetime.now(timezone.utc)
     btc_ref_by_id = {r.market_id: r for r in btc_refs}
@@ -995,6 +1031,30 @@ def run_once(cfg: dict):
         fb = [row_by_market[m] for m in btc_ids if m in row_by_market and row_by_market[m] not in btc_rows]
         fb.sort(key=lambda x: (x["ask_sum_with_fees"], -x["depth_usd"]))
         btc_rows.extend(fb[: max(0, target_total - len(btc_rows))])
+
+    # Hard guarantee: always include one active 5m BTC market in primary group if available.
+    has_5m = any(_tf_bucket(r) == "5m" for r in btc_rows)
+    if not has_5m:
+        now_u = datetime.now(timezone.utc)
+        five_refs = []
+        for rr in btc_refs:
+            slug_l = str(getattr(rr, "slug", "") or "").lower()
+            if "-5m-" not in slug_l:
+                continue
+            dt = _parse_dt(getattr(rr, "end_date", ""))
+            if not dt:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt < now_u:
+                continue
+            five_refs.append((dt, rr))
+        five_refs.sort(key=lambda x: x[0])
+        for _dt, rr in five_refs:
+            cand = row_by_market.get(str(rr.market_id))
+            if cand is not None and cand not in btc_rows:
+                btc_rows.append(cand)
+                break
 
     # Keep any currently open markets visible so dashboard can mark-to-market PnL.
     open_market_ids = {str(p.market_id) for p in state.positions if str(getattr(p, "status", "open")) == "open"}

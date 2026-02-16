@@ -164,9 +164,11 @@ class GammaAdapter:
 
         slugs: list[str] = []
         tf = (timeframe or "").lower()
+        tf_token = f"-{tf}-"
         for p in prefixes:
             lp = (p or "").lower()
-            if tf not in lp:
+            # Exact timeframe token match (avoid 5m matching 15m).
+            if tf_token not in lp:
                 continue
             for t in ts_candidates:
                 slugs.append(f"{p}{t}")
