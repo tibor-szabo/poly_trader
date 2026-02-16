@@ -84,6 +84,8 @@ def main():
     by_side = Counter((e.get("side") or "-") for e in closes)
     by_model = Counter((e.get("model_open") or e.get("model") or "-") for e in closes)
     close_reasons = Counter((e.get("reason") or "-") for e in closes)
+    open_execution = Counter((e.get("open_execution") or "-") for e in opens)
+    close_execution = Counter((e.get("close_execution") or "-") for e in closes)
 
     side_pnl = defaultdict(float)
     model_pnl = defaultdict(float)
@@ -114,6 +116,7 @@ def main():
     reentries = 0
     fast_reentries = 0
     hold_s = []
+    hold_pairs = []
     closes_per_market = Counter(str(e.get("market_id") or "") for e in closes if e.get("market_id") is not None)
     partials_per_market = Counter(str(e.get("market_id") or "") for e in partial_closes if e.get("market_id") is not None)
     for e in opens:
@@ -133,9 +136,13 @@ def main():
         ot = to_epoch(e.get("opened_at"))
         ct = to_epoch(e.get("closed_at") or e.get("ts"))
         if ot and ct and ct >= ot:
-            hold_s.append(ct - ot)
+            h = ct - ot
+            hold_s.append(h)
+            hold_pairs.append((e, h))
 
     avg_hold = (sum(hold_s) / len(hold_s)) if hold_s else 0.0
+    loss_hold = [h for e, h in hold_pairs if float(e.get("pnl_usd") or 0.0) < 0]
+    win_hold = [h for e, h in hold_pairs if float(e.get("pnl_usd") or 0.0) > 0]
 
     out = {
         "window_minutes": round(window_s / 60.0, 2),
@@ -152,12 +159,16 @@ def main():
         "by_model_winrate_pct": {
             k: round((model_wins.get(k, 0) / max(1, n)) * 100.0, 2) for k, n in model_trades.items()
         },
+        "open_execution": dict(open_execution),
+        "close_execution": dict(close_execution),
         "close_reasons": dict(close_reasons),
         "close_reasons_pnl": {k: round(v, 4) for k, v in reason_pnl.items()},
         "churn": {
             "reentries_10m": reentries,
             "fast_reentries_3m": fast_reentries,
             "avg_hold_seconds": round(avg_hold, 2),
+            "avg_hold_seconds_wins": round((sum(win_hold) / len(win_hold)), 2) if win_hold else 0.0,
+            "avg_hold_seconds_losses": round((sum(loss_hold) / len(loss_hold)), 2) if loss_hold else 0.0,
             "markets_with_multiple_closes": sum(1 for _, n in closes_per_market.items() if n > 1),
             "top_repeated_markets": [
                 {"market_id": k, "closes": n} for k, n in closes_per_market.most_common(3) if n > 1

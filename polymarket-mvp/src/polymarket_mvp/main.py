@@ -1238,6 +1238,7 @@ def run_once(cfg: dict):
     scalp_buy_no_min_impulse_bps = float(strategy_cfg.get("scalp_buy_no_min_impulse_bps", scalp_min_impulse_bps))
     scalp_min_edge = float(strategy_cfg.get("scalp_min_edge", 0.03))
     hard_stop_pct = float(strategy_cfg.get("hard_stop_pct", -0.15))
+    open_fallback_max_spread = float(strategy_cfg.get("open_fallback_max_spread", 0.018))
     min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
     max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
@@ -1398,6 +1399,7 @@ def run_once(cfg: dict):
             tick = float(ex_cfg.get("tick_size", 0.001))
             improve_ticks = int(ex_cfg.get("open_limit_improve_ticks", 1))
             open_fallback_taker = bool(ex_cfg.get("open_limit_fallback_taker", True))
+            spread_open = max(0.0, ask_open - bid_open) if (ask_open > 0 and bid_open > 0) else 0.0
             if open_mode == "market":
                 entry = ask_open
                 open_exec = "open_market"
@@ -1406,12 +1408,26 @@ def run_once(cfg: dict):
                 if ask_open > 0 and limit_open >= ask_open:
                     entry = ask_open
                     open_exec = "open_limit_fill"
-                elif open_fallback_taker and ask_open > 0:
+                elif open_fallback_taker and ask_open > 0 and spread_open <= open_fallback_max_spread:
                     entry = ask_open
                     open_exec = "open_limit_timeout_fallback"
                 else:
                     entry = 0.0
                     open_exec = "open_limit_pending_skip"
+                    if open_fallback_taker and ask_open > 0:
+                        append_event(cfg["storage"]["events_path"], {
+                            "type": "market_guardrail",
+                            "market_id": mid,
+                            "reason": "open_fallback_spread_too_wide",
+                            "side": side,
+                            "best_bid": round(float(bid_open), 4),
+                            "best_ask": round(float(ask_open), 4),
+                            "spread": round(float(spread_open), 4),
+                            "max_spread": round(float(open_fallback_max_spread), 4),
+                            "confidence": conf,
+                            "consensus": consensus,
+                            "model": str(best_model),
+                        })
 
             # Confidence-weighted sizing; smaller size for scalp entries.
             size_mul = max(0.5, min(1.0, 0.5 + (conf / 100.0) * 0.6))
