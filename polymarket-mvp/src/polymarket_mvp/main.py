@@ -54,6 +54,7 @@ _GLOBAL_OPEN_PAUSE_UNTIL = 0.0
 _RECENT_FLIP_STOP_LOSS_TS = []
 _PENDING_CLOSES = {}
 _LIVE_EXECUTOR = None
+_LAST_TA_SIG = {}
 
 
 def _pos_key(pos) -> str:
@@ -252,7 +253,11 @@ def _price_near_ts(ts: float, max_delta_s: float = 120.0) -> Optional[float]:
 
 def _fetch_alt_price(source: str) -> Optional[float]:
     try:
-        if source == "coinbase":
+        if source == "binance":
+            r = httpx.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=1.5)
+            if r.status_code == 200:
+                return float((r.json() or {}).get("price"))
+        elif source == "coinbase":
             r = httpx.get("https://api.exchange.coinbase.com/products/BTC-USD/ticker", timeout=1.5)
             if r.status_code == 200:
                 return float(r.json().get("price"))
@@ -369,6 +374,8 @@ def _compute_binance_ta_signal() -> dict:
     pts = []
     for x in _BTC_SIGNAL_HISTORY:
         bi = x.get("bi")
+        if bi is None:
+            bi = x.get("p")  # fallback when direct Binance tick is temporarily missing
         if bi is not None:
             try:
                 v = float(bi)
@@ -441,6 +448,50 @@ def _compute_binance_ta_signal() -> dict:
         "vol_z": vol_z,
         "sigma": sig,
     }
+
+
+def _compute_binance_ta_signal_from_events(events_path: str) -> dict:
+    try:
+        p = Path(events_path)
+        if not p.exists():
+            return _compute_binance_ta_signal()
+        with p.open("rb") as f:
+            f.seek(0, 2)
+            n = f.tell()
+            f.seek(max(0, n - 220_000))
+            blob = f.read().decode("utf-8", "ignore")
+        pts = []
+        for ln in blob.splitlines():
+            if '"type": "btc_price_tick"' not in ln:
+                continue
+            try:
+                o = json.loads(ln)
+            except Exception:
+                continue
+            bi = o.get("binance")
+            ts = o.get("ts")
+            try:
+                bv = float(bi)
+                tv = float(ts)
+            except Exception:
+                continue
+            if bv > 0:
+                pts.append({"t": tv, "p": bv})
+        if len(pts) < 25:
+            return _compute_binance_ta_signal()
+
+        # Temporarily evaluate TA on extracted sequence.
+        bak = list(_BTC_SIGNAL_HISTORY)
+        try:
+            _BTC_SIGNAL_HISTORY.clear()
+            for x in pts[-400:]:
+                _BTC_SIGNAL_HISTORY.append({"t": x["t"], "p": x["p"], "bi": x["p"], "cl": None})
+            return _compute_binance_ta_signal()
+        finally:
+            _BTC_SIGNAL_HISTORY.clear()
+            _BTC_SIGNAL_HISTORY.extend(bak)
+    except Exception:
+        return _compute_binance_ta_signal()
 
 
 
@@ -1079,6 +1130,13 @@ def run_once(cfg: dict):
         variant = "five" if tfv == "5m" else "fifteen"
         target_px, current_px = _polymarket_btc_prices(st, ed, variant=variant)
         chainlink_live, binance_live = _btc_live_prices()
+        if binance_live is None:
+            now_imp_ts = datetime.now(timezone.utc).timestamp()
+            if now_imp_ts - float(_PRICE_SRC_LAST.get("binance", 0.0)) >= 1.0:
+                _PRICE_SRC_LAST["binance"] = now_imp_ts
+                bpx = _fetch_alt_price("binance")
+                if bpx is not None:
+                    binance_live = bpx
         if current_px is None:
             current_px = chainlink_live if chainlink_live is not None else binance_live
 
@@ -1127,7 +1185,23 @@ def run_once(cfg: dict):
         sigm = _compute_btc_signal()
         model_engine = str(strategy_cfg.get("probability_engine", "hybrid")).lower()
         if model_engine == "binance_ta_v1":
-            ta_sig = _compute_binance_ta_signal()
+            ta_sig = _compute_binance_ta_signal_from_events(cfg["storage"]["events_path"])
+            global _LAST_TA_SIG
+            if int(ta_sig.get("confidence", 0) or 0) <= 0 and _LAST_TA_SIG:
+                ta_sig = dict(_LAST_TA_SIG)
+            elif int(ta_sig.get("confidence", 0) or 0) <= 0:
+                # Warm fallback: avoid all-zero UI/signals when Binance-only history is temporarily thin.
+                p_f = max(0.02, min(0.98, float(sigm.get("p_up", 0.5))))
+                ta_sig = {
+                    "p_up": p_f,
+                    "confidence": int(max(1, min(99, round(abs((p_f - 0.5) * 2.0) * 100)))),
+                    "trend": float(sigm.get("rf", 0.0)),
+                    "mom": float(sigm.get("rs", 0.0)),
+                    "rsi_n": float(sigm.get("rsi_n", 0.0)),
+                    "vol_z": 0.0,
+                }
+            else:
+                _LAST_TA_SIG = dict(ta_sig)
             p_yes = max(0.02, min(0.98, float(ta_sig.get("p_up", 0.5))))
             side = "BUY_YES" if p_yes >= 0.5 else "BUY_NO"
             cmp = {
@@ -1141,8 +1215,8 @@ def run_once(cfg: dict):
                 "consensus": 1,
                 "weights": {"TA_BINANCE": 1.0},
             }
-            r["ta_trend"] = round(float(ta_sig.get("trend", 0.0)), 6)
-            r["ta_mom"] = round(float(ta_sig.get("mom", 0.0)), 6)
+            r["ta_trend"] = round(float(ta_sig.get("trend", 0.0)), 8)
+            r["ta_mom"] = round(float(ta_sig.get("mom", 0.0)), 8)
             r["ta_rsi_n"] = round(float(ta_sig.get("rsi_n", 0.0)), 6)
             r["ta_vol_z"] = round(float(ta_sig.get("vol_z", 0.0)), 4)
         else:
