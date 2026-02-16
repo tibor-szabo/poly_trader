@@ -236,6 +236,12 @@ function render(d) {
       ${cellWithChange(x.p_yes_model, prev.p_yes_model)}
       ${cellWithChange(x.p_hit_target, prev.p_hit_target)}
       ${cellWithChange(ms.label, prev.best_model)}
+      ${cellWithChange(x.p_yes_model, prev.p_yes_model)}
+      ${cellWithChange(x.model_confidence, prev.model_confidence)}
+      ${cellWithChange(x.ta_trend, prev.ta_trend)}
+      ${cellWithChange(x.ta_mom, prev.ta_mom)}
+      ${cellWithChange(x.ta_rsi_n, prev.ta_rsi_n)}
+      ${cellWithChange(x.ta_vol_z, prev.ta_vol_z)}
       ${cellWithChange(x.best_ask_yes, prev.best_ask_yes)}
       ${cellWithChange(x.best_ask_no, prev.best_ask_no)}
       ${cellWithChange(x.ask_sum_no_fees, prev.ask_sum_no_fees)}
@@ -252,6 +258,11 @@ function render(d) {
       p_yes_model: x.p_yes_model,
       p_hit_target: x.p_hit_target,
       best_model: ms.label,
+      model_confidence: x.model_confidence,
+      ta_trend: x.ta_trend,
+      ta_mom: x.ta_mom,
+      ta_rsi_n: x.ta_rsi_n,
+      ta_vol_z: x.ta_vol_z,
       best_ask_yes: x.best_ask_yes,
       best_ask_no: x.best_ask_no,
       ask_sum_no_fees: x.ask_sum_no_fees,
