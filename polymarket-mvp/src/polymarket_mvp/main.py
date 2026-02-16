@@ -365,6 +365,85 @@ def _compute_btc_signal() -> dict:
     return {"p_up": p_up, "lead_bps": lead_bps, "rf": rf, "rs": rs, "sigma": sigma, "rsi_n": rsi_n}
 
 
+def _compute_binance_ta_signal() -> dict:
+    pts = []
+    for x in _BTC_SIGNAL_HISTORY:
+        bi = x.get("bi")
+        if bi is not None:
+            try:
+                v = float(bi)
+                if v > 0:
+                    pts.append({"t": float(x.get("t") or 0.0), "p": v})
+            except Exception:
+                continue
+    if len(pts) < 25:
+        return {"p_up": 0.5, "confidence": 0, "trend": 0.0, "mom": 0.0, "rsi_n": 0.0, "vol_z": 0.0}
+
+    prices = [x["p"] for x in pts]
+    now = pts[-1]["t"]
+
+    def _ema(vals, n):
+        a = 2.0 / (n + 1.0)
+        e = float(vals[0])
+        for v in vals[1:]:
+            e = a * float(v) + (1.0 - a) * e
+        return e
+
+    ema_fast = _ema(prices[-12:], min(12, len(prices[-12:])))
+    ema_slow = _ema(prices[-26:], min(26, len(prices[-26:])))
+    trend = 0.0 if ema_slow <= 0 else (ema_fast - ema_slow) / ema_slow
+
+    p20 = prices[-1]
+    for x in reversed(pts):
+        if (now - x["t"]) >= 20.0:
+            p20 = x["p"]
+            break
+    p60 = prices[-1]
+    for x in reversed(pts):
+        if (now - x["t"]) >= 60.0:
+            p60 = x["p"]
+            break
+    mom = 0.0 if p20 <= 0 else math.log(prices[-1] / p20)
+    mom_slow = 0.0 if p60 <= 0 else math.log(prices[-1] / p60)
+
+    up = 0.0
+    down = 0.0
+    look = prices[-20:]
+    for i in range(1, len(look)):
+        d = look[i] - look[i - 1]
+        if d > 0:
+            up += d
+        else:
+            down += -d
+    rsi = 50.0 if (up + down) <= 0 else (100.0 * up / (up + down))
+    rsi_n = (rsi - 50.0) / 50.0
+
+    rets = []
+    for i in range(1, len(prices[-40:])):
+        a = float(prices[-40:][i - 1]); b = float(prices[-40:][i])
+        if a > 0 and b > 0:
+            rets.append(math.log(b / a))
+    sig = math.sqrt(sum(r*r for r in rets) / len(rets)) if rets else 0.0001
+    vol_ref = 0.00025
+    vol_z = max(-2.0, min(2.0, (sig - vol_ref) / max(vol_ref, 1e-6)))
+
+    score = 2.2 * trend + 1.6 * mom + 0.8 * mom_slow + 0.9 * rsi_n - 0.45 * max(0.0, vol_z)
+    z = max(-8.0, min(8.0, score / max(0.0012, 4.0 * sig)))
+    p_up = 1.0 / (1.0 + math.exp(-z))
+    confidence = int(max(1, min(99, round(abs((p_up - 0.5) * 2.0) * 100))))
+    return {
+        "p_up": p_up,
+        "confidence": confidence,
+        "trend": trend,
+        "mom": mom,
+        "mom_slow": mom_slow,
+        "rsi_n": rsi_n,
+        "vol_z": vol_z,
+        "sigma": sig,
+    }
+
+
+
 def _bids_from_p(row: dict, p_up: float, margin: float = 0.006) -> tuple[Optional[float], Optional[float]]:
     ay = float(row.get("best_ask_yes") or 0.0)
     an = float(row.get("best_ask_no") or 0.0)
@@ -583,6 +662,7 @@ def run_once(cfg: dict):
     clob.reset_call_count()
     gamma.reset_call_count()
     state = load_state(cfg["storage"]["state_path"], float(cfg["paper"]["starting_cash_usd"]))
+    strategy_cfg = cfg.get("strategy", {})
 
     snapshots = []
     try:
@@ -981,8 +1061,29 @@ def run_once(cfg: dict):
 
         _update_btc_signal_history(current_px, binance_live)
         sigm = _compute_btc_signal()
-        cmp = _model_compare(r, sigm)
-        r["model_ta"] = cmp["models"].get("TA")
+        model_engine = str(strategy_cfg.get("probability_engine", "hybrid")).lower()
+        if model_engine == "binance_ta_v1":
+            ta_sig = _compute_binance_ta_signal()
+            p_yes = max(0.02, min(0.98, float(ta_sig.get("p_up", 0.5))))
+            side = "BUY_YES" if p_yes >= 0.5 else "BUY_NO"
+            cmp = {
+                "models": {"TA": _bids_from_p(r, p_yes, 0.006), "LL": None, "RG": None, "BK": None},
+                "probs": {"TA_BINANCE": p_yes},
+                "p_yes_ens": p_yes,
+                "p_hit_target": p_yes if side == "BUY_YES" else (1.0 - p_yes),
+                "best": "TA_BINANCE",
+                "side": side,
+                "confidence": int(ta_sig.get("confidence", 0)),
+                "consensus": 1,
+                "weights": {"TA_BINANCE": 1.0},
+            }
+            r["ta_trend"] = round(float(ta_sig.get("trend", 0.0)), 6)
+            r["ta_mom"] = round(float(ta_sig.get("mom", 0.0)), 6)
+            r["ta_rsi_n"] = round(float(ta_sig.get("rsi_n", 0.0)), 6)
+            r["ta_vol_z"] = round(float(ta_sig.get("vol_z", 0.0)), 4)
+        else:
+            cmp = _model_compare(r, sigm)
+        r["model_ta"] = cmp["models"].get("TA") if isinstance(cmp.get("models"), dict) else None
         r["model_ll"] = cmp["models"].get("LL")
         r["model_rg"] = cmp["models"].get("RG")
         r["model_bk"] = cmp["models"].get("BK")

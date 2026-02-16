@@ -59,6 +59,7 @@ paper:
 
 strategy:
   impulse_source: "binance"  # binance|coinbase|kraken|bybit
+  probability_engine: "binance_ta_v1"  # hybrid|binance_ta_v1
   trade_cap_usd: 100
   max_trade_cash_fraction: 0.035
   max_open_positions: 2
