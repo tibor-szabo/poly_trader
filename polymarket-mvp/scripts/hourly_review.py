@@ -86,6 +86,7 @@ def main():
     close_reasons = Counter((e.get("reason") or "-") for e in closes)
     open_execution = Counter((e.get("open_execution") or "-") for e in opens)
     close_execution = Counter((e.get("close_execution") or "-") for e in closes)
+    open_fallback_count = int(open_execution.get("open_limit_timeout_fallback", 0))
 
     side_pnl = defaultdict(float)
     model_pnl = defaultdict(float)
@@ -144,6 +145,12 @@ def main():
     loss_hold = [h for e, h in hold_pairs if float(e.get("pnl_usd") or 0.0) < 0]
     win_hold = [h for e, h in hold_pairs if float(e.get("pnl_usd") or 0.0) > 0]
 
+    review_flags = []
+    if len(closes) < 5:
+        review_flags.append("low_sample_size")
+    if len(opens) > 0 and (open_fallback_count / max(1, len(opens))) >= 0.5:
+        review_flags.append("high_open_fallback_share")
+
     out = {
         "window_minutes": round(window_s / 60.0, 2),
         "counts": {"opens": len(opens), "closes": len(closes), "partial_closes": len(partial_closes)},
@@ -160,6 +167,7 @@ def main():
             k: round((model_wins.get(k, 0) / max(1, n)) * 100.0, 2) for k, n in model_trades.items()
         },
         "open_execution": dict(open_execution),
+        "open_fallback_rate_pct": round((open_fallback_count / max(1, len(opens))) * 100.0, 2),
         "close_execution": dict(close_execution),
         "close_reasons": dict(close_reasons),
         "close_reasons_pnl": {k: round(v, 4) for k, v in reason_pnl.items()},
@@ -178,6 +186,7 @@ def main():
             ],
         },
         "guardrails_triggered": len(guards),
+        "review_flags": review_flags,
     }
     print(json.dumps(out, indent=2, sort_keys=True))
 

@@ -1516,6 +1516,10 @@ def run_once(cfg: dict):
         btc_now = float(r.get("btc_current") or 0.0)
         btc_target = float(r.get("btc_target") or 0.0)
         t_left_s = max(0.0, float(r.get("t_left_s") or 0.0))
+        # Recompute using wall-clock to avoid stale snapshot t_left_s near market expiry.
+        end_ts_live = float(r.get("end_ts") or 0.0)
+        t_left_open_s = (end_ts_live - datetime.now(timezone.utc).timestamp()) if end_ts_live > 0 else t_left_s
+        t_left_open_s = max(0.0, t_left_open_s)
         winner_side = "BUY_YES" if btc_now >= btc_target else "BUY_NO"
         dist_bps = ((btc_now - btc_target) / btc_target * 10000.0) if btc_target > 0 else 0.0
         # Reversal belief from ensemble probability.
@@ -1548,6 +1552,7 @@ def run_once(cfg: dict):
             "best_model": best_model,
             "edge_yes": edge_yes,
             "edge_no": edge_no,
+            "t_left_open_s": round(float(t_left_open_s), 2),
             "open_positions": len(open_map),
             "flip_fail_streak": int(_FLIP_FAIL_STREAK.get(mid, 0) or 0),
             "market_locked": bool(datetime.now(timezone.utc).timestamp() < float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0)),
@@ -1613,7 +1618,7 @@ def run_once(cfg: dict):
         impulse_bps = float(impulse.get("bps_3s") or 0.0)
 
         # Avoid late contrarian flips when winner side is already stable.
-        late_contrarian_block = (t_left_s < 240) and (winner_stability >= 0.70) and (open_side != winner_side)
+        late_contrarian_block = (t_left_open_s < 240) and (winner_stability >= 0.70) and (open_side != winner_side)
         min_stability_floor = normal_open_buy_yes_min_winner_stability if open_side == "BUY_YES" else normal_open_min_winner_stability
         low_stability_block = winner_stability < min_stability_floor
         model_side_stability_floor = model_side_stability_buy_yes_min if open_side == "BUY_YES" else model_side_stability_min
@@ -1623,11 +1628,11 @@ def run_once(cfg: dict):
             or (open_side == "BUY_NO" and impulse_bps >= abs(normal_open_max_opposing_impulse_bps))
         )
 
-        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and t_left_s >= min_time_left_for_entry_s and (not late_contrarian_block) and (not low_stability_block) and (not low_model_side_stability_block) and (not impulse_against_open)
+        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and t_left_open_s >= min_time_left_for_entry_s and (not late_contrarian_block) and (not low_stability_block) and (not low_model_side_stability_block) and (not impulse_against_open)
 
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
         scalp_impulse_req = scalp_buy_yes_min_impulse_bps if impulse_side == "BUY_YES" else scalp_buy_no_min_impulse_bps
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_s >= max(75.0, min_time_left_for_entry_s)
+        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_open_s >= max(75.0, min_time_left_for_entry_s)
 
         if normal_open_ok or scalp_open_ok:
             side = impulse_side if scalp_open_ok else open_side
