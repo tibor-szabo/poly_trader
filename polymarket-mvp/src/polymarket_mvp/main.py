@@ -237,6 +237,18 @@ def _price_ago(sec: float) -> Optional[float]:
     return float(_BTC_SIGNAL_HISTORY[0]["p"])
 
 
+def _latest_signal_price(max_staleness_s: float = 120.0) -> Optional[float]:
+    if not _BTC_SIGNAL_HISTORY:
+        return None
+    last = _BTC_SIGNAL_HISTORY[-1]
+    now_ts = datetime.now(timezone.utc).timestamp()
+    age = now_ts - float(last.get("t", 0.0))
+    if age > max_staleness_s:
+        return None
+    p = float(last.get("p") or 0.0)
+    return p if p > 0 else None
+
+
 def _price_near_ts(ts: float, max_delta_s: float = 120.0) -> Optional[float]:
     if not _BTC_SIGNAL_HISTORY:
         return None
@@ -260,35 +272,47 @@ def _binance_open_price_near_ts(ts: float, max_age_s: float = 7200.0) -> Optiona
         px = float(hit.get("price") or 0.0)
         return px if px > 0 else None
 
-    try:
-        ms = int(max(0.0, ts) * 1000)
-        # Wider window + slightly longer timeout improves resilience when Binance is jittery.
-        start_ms = max(0, ms - 180000)
-        end_ms = ms + 180000
-        r = httpx.get(
-            "https://api.binance.com/api/v3/klines",
-            params={"symbol": "BTCUSDT", "interval": "1m", "startTime": start_ms, "endTime": end_ms, "limit": 7},
-            timeout=3.0,
-        )
-        if r.status_code != 200:
-            return None
-        rows = r.json() or []
-        best_px = None
-        best_dt = 1e18
-        for row in rows:
-            if not isinstance(row, list) or len(row) < 2:
+    ms = int(max(0.0, ts) * 1000)
+    # Try a tight 1m window first, then a wider 5m fallback if Binance is jittery.
+    attempts = [
+        {"interval": "1m", "window_ms": 180000, "limit": 7, "timeout": 3.0},
+        {"interval": "5m", "window_ms": 1800000, "limit": 12, "timeout": 3.5},
+    ]
+    for a in attempts:
+        start_ms = max(0, ms - int(a["window_ms"]))
+        end_ms = ms + int(a["window_ms"])
+        try:
+            r = httpx.get(
+                "https://api.binance.com/api/v3/klines",
+                params={
+                    "symbol": "BTCUSDT",
+                    "interval": str(a["interval"]),
+                    "startTime": start_ms,
+                    "endTime": end_ms,
+                    "limit": int(a["limit"]),
+                },
+                timeout=float(a["timeout"]),
+            )
+            if r.status_code != 200:
                 continue
-            k_open_ms = int(row[0])
-            dt = abs((k_open_ms / 1000.0) - ts)
-            if dt < best_dt:
-                best_dt = dt
-                best_px = float(row[1])
-        if best_px is None or best_dt > max_age_s:
-            return None
-        _BINANCE_OPEN_PRICE_CACHE[key] = {"price": float(best_px), "cached_ts": now_ts}
-        return float(best_px)
-    except Exception:
-        return None
+            rows = r.json() or []
+            best_px = None
+            best_dt = 1e18
+            for row in rows:
+                if not isinstance(row, list) or len(row) < 2:
+                    continue
+                k_open_ms = int(row[0])
+                dt = abs((k_open_ms / 1000.0) - ts)
+                if dt < best_dt:
+                    best_dt = dt
+                    best_px = float(row[1])
+            if best_px is None or best_dt > max_age_s:
+                continue
+            _BINANCE_OPEN_PRICE_CACHE[key] = {"price": float(best_px), "cached_ts": now_ts}
+            return float(best_px)
+        except Exception:
+            continue
+    return None
 
 
 def _fetch_alt_price(source: str) -> Optional[float]:
@@ -1205,6 +1229,8 @@ def run_once(cfg: dict):
                     binance_live = bpx
         if current_px is None:
             current_px = chainlink_live if chainlink_live is not None else binance_live
+        if current_px is None:
+            current_px = _latest_signal_price(max_staleness_s=180.0)
 
         mid = str(r.get("market_id"))
         st_dt = _parse_dt(st) if st else None
