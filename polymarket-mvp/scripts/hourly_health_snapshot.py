@@ -210,6 +210,21 @@ print(
     f"market_guardrail={guardrails_1h}",
 )
 
+# Promote runtime error counts into an explicit health line so operators
+# don't miss adapter/loop degradation in dense logs.
+if loop_errors_1h >= 5 or adapter_errors_1h >= 5:
+    runtime_error_health = "HOT"
+elif loop_errors_1h > 0 or adapter_errors_1h > 0:
+    runtime_error_health = "WARN"
+else:
+    runtime_error_health = "OK"
+print(
+    "runtime_error_health",
+    runtime_error_health,
+    f"loop_error_1h={loop_errors_1h}",
+    f"adapter_error_1h={adapter_errors_1h}",
+)
+
 # Lightweight health signal for discovery coverage reliability.
 if btc_target_missing_1h >= 50:
     print("btc_discovery_health", "DEGRADED", f"missing_per_hour={btc_target_missing_1h}")
