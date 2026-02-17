@@ -54,6 +54,10 @@ def main():
     window_s = max(60.0, float(args.window_hours) * 3600.0)
     cut = now - window_s
     opens, closes, partial_closes, guards = [], [], [], []
+    event_type_counts = Counter()
+    opportunity_seen_count = 0
+    ws_opportunity_seen_count = 0
+    btc_target_missing_count = 0
 
     for line in iter_recent_lines(args.events, args.recent_lines):
         try:
@@ -64,6 +68,14 @@ def main():
         if not t or t < cut:
             continue
         typ = e.get("type")
+        event_type_counts[str(typ or "-")] += 1
+        if typ == "opportunity_seen":
+            opportunity_seen_count += 1
+        elif typ == "ws_opportunity_seen":
+            ws_opportunity_seen_count += 1
+        elif typ == "btc_target_missing":
+            btc_target_missing_count += 1
+
         if typ == "paper_trade":
             action = str(e.get("action") or "")
             if action == "OPEN":
@@ -150,6 +162,10 @@ def main():
         review_flags.append("low_sample_size")
     if len(opens) > 0 and (open_fallback_count / max(1, len(opens))) >= 0.5:
         review_flags.append("high_open_fallback_share")
+    if (len(opens) + len(closes)) == 0 and (opportunity_seen_count + ws_opportunity_seen_count) > 0:
+        review_flags.append("opportunities_without_trades")
+    if btc_target_missing_count > 0:
+        review_flags.append("btc_target_missing")
 
     out = {
         "window_minutes": round(window_s / 60.0, 2),
@@ -186,6 +202,13 @@ def main():
             ],
         },
         "guardrails_triggered": len(guards),
+        "opportunity_seen": {
+            "scanner": opportunity_seen_count,
+            "ws": ws_opportunity_seen_count,
+            "total": opportunity_seen_count + ws_opportunity_seen_count,
+        },
+        "btc_target_missing": btc_target_missing_count,
+        "event_type_counts": dict(event_type_counts),
         "review_flags": review_flags,
     }
     print(json.dumps(out, indent=2, sort_keys=True))
