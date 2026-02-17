@@ -1595,6 +1595,7 @@ def run_once(cfg: dict):
     hard_stop_pct = float(strategy_cfg.get("hard_stop_pct", -0.15))
     open_fallback_max_spread = float(strategy_cfg.get("open_fallback_max_spread", 0.018))
     open_fallback_min_edge = float(strategy_cfg.get("open_fallback_min_edge", 0.03))
+    open_fallback_min_confidence = int(strategy_cfg.get("open_fallback_min_confidence", 70))
     min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
     max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
@@ -1776,14 +1777,19 @@ def run_once(cfg: dict):
                 if ask_open > 0 and limit_open >= ask_open:
                     entry = ask_open
                     open_exec = "open_limit_fill"
-                elif open_fallback_taker and ask_open > 0 and spread_open <= open_fallback_max_spread and side_edge >= open_fallback_min_edge:
+                elif open_fallback_taker and ask_open > 0 and spread_open <= open_fallback_max_spread and side_edge >= open_fallback_min_edge and conf >= open_fallback_min_confidence:
                     entry = ask_open
                     open_exec = "open_limit_timeout_fallback"
                 else:
                     entry = 0.0
                     open_exec = "open_limit_pending_skip"
                     if open_fallback_taker and ask_open > 0:
-                        reason = "open_fallback_spread_too_wide" if spread_open > open_fallback_max_spread else "open_fallback_edge_too_low"
+                        if spread_open > open_fallback_max_spread:
+                            reason = "open_fallback_spread_too_wide"
+                        elif side_edge < open_fallback_min_edge:
+                            reason = "open_fallback_edge_too_low"
+                        else:
+                            reason = "open_fallback_conf_too_low"
                         append_event(cfg["storage"]["events_path"], {
                             "type": "market_guardrail",
                             "market_id": mid,
@@ -1796,6 +1802,7 @@ def run_once(cfg: dict):
                             "side_edge": round(float(side_edge), 4),
                             "min_side_edge": round(float(open_fallback_min_edge), 4),
                             "confidence": conf,
+                            "min_confidence": int(open_fallback_min_confidence),
                             "consensus": consensus,
                             "model": str(best_model),
                         })
