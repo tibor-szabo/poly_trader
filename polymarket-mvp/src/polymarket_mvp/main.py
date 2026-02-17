@@ -256,18 +256,19 @@ def _binance_open_price_near_ts(ts: float, max_age_s: float = 7200.0) -> Optiona
     now_ts = datetime.now(timezone.utc).timestamp()
     key = int(ts // 60)
     hit = _BINANCE_OPEN_PRICE_CACHE.get(key)
-    if hit and (now_ts - float(hit.get("cached_ts", 0.0))) <= 600.0:
+    if hit and (now_ts - float(hit.get("cached_ts", 0.0))) <= 1800.0:
         px = float(hit.get("price") or 0.0)
         return px if px > 0 else None
 
     try:
         ms = int(max(0.0, ts) * 1000)
-        start_ms = max(0, ms - 60000)
-        end_ms = ms + 60000
+        # Wider window + slightly longer timeout improves resilience when Binance is jittery.
+        start_ms = max(0, ms - 180000)
+        end_ms = ms + 180000
         r = httpx.get(
             "https://api.binance.com/api/v3/klines",
-            params={"symbol": "BTCUSDT", "interval": "1m", "startTime": start_ms, "endTime": end_ms, "limit": 3},
-            timeout=1.8,
+            params={"symbol": "BTCUSDT", "interval": "1m", "startTime": start_ms, "endTime": end_ms, "limit": 7},
+            timeout=3.0,
         )
         if r.status_code != 200:
             return None

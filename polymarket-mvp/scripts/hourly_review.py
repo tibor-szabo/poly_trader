@@ -58,6 +58,7 @@ def main():
     opportunity_seen_count = 0
     ws_opportunity_seen_count = 0
     btc_target_missing_count = 0
+    btc_target_missing_markets = Counter()
 
     for line in iter_recent_lines(args.events, args.recent_lines):
         try:
@@ -75,6 +76,9 @@ def main():
             ws_opportunity_seen_count += 1
         elif typ == "btc_target_missing":
             btc_target_missing_count += 1
+            market_id = str(e.get("market_id") or "")
+            if market_id:
+                btc_target_missing_markets[market_id] += 1
 
         if typ == "paper_trade":
             action = str(e.get("action") or "")
@@ -208,6 +212,15 @@ def main():
             "total": opportunity_seen_count + ws_opportunity_seen_count,
         },
         "btc_target_missing": btc_target_missing_count,
+        "btc_target_missing_per_hour": round(btc_target_missing_count / max(1e-9, args.window_hours), 2),
+        "btc_target_missing_top_markets": [
+            {"market_id": mid, "count": cnt}
+            for mid, cnt in btc_target_missing_markets.most_common(5)
+        ],
+        "opportunity_to_trade_conversion_pct": round(
+            (len(opens) / max(1, opportunity_seen_count + ws_opportunity_seen_count)) * 100.0,
+            2,
+        ),
         "event_type_counts": dict(event_type_counts),
         "review_flags": review_flags,
     }
