@@ -56,6 +56,7 @@ _RECENT_FLIP_STOP_LOSS_TS = []
 _PENDING_CLOSES = {}
 _LIVE_EXECUTOR = None
 _LAST_TA_SIG = {}
+_LAST_OPEN_TS = 0.0
 
 
 def _pos_key(pos) -> str:
@@ -795,7 +796,7 @@ def _infer_btc_target_from_text(question: str) -> Optional[float]:
 
 
 def run_once(cfg: dict):
-    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS
+    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS, _LAST_OPEN_TS
     _ensure_btc_live_feed(cfg["storage"]["events_path"])
 
     clob = ClobAdapter(cfg["data"]["clob_rest_base"])
@@ -1570,6 +1571,12 @@ def run_once(cfg: dict):
     normal_open_min_winner_stability = float(strategy_cfg.get("normal_open_min_winner_stability", 0.12))
     normal_open_buy_yes_min_winner_stability = float(strategy_cfg.get("normal_open_buy_yes_min_winner_stability", 0.30))
     normal_open_max_opposing_impulse_bps = float(strategy_cfg.get("normal_open_max_opposing_impulse_bps", 3.0))
+    exploration_enabled = bool(strategy_cfg.get("exploration_enabled", True))
+    exploration_idle_seconds = float(strategy_cfg.get("exploration_idle_seconds", 1800.0))
+    exploration_min_confidence = int(strategy_cfg.get("exploration_min_confidence", 55))
+    exploration_min_time_left_s = float(strategy_cfg.get("exploration_min_time_left_s", 120.0))
+    exploration_edge_floor = float(strategy_cfg.get("exploration_edge_floor", 0.012))
+    exploration_size_mult = float(strategy_cfg.get("exploration_size_mult", 0.35))
     model_side_stability_window = int(strategy_cfg.get("model_side_stability_window", 8))
     model_side_stability_min = float(strategy_cfg.get("model_side_stability_min", 0.55))
     model_side_stability_buy_yes_min = float(strategy_cfg.get("model_side_stability_buy_yes_min", 0.70))
@@ -1744,8 +1751,15 @@ def run_once(cfg: dict):
         scalp_impulse_req = scalp_buy_yes_min_impulse_bps if impulse_side == "BUY_YES" else scalp_buy_no_min_impulse_bps
         scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_open_s >= max(75.0, min_time_left_for_entry_s)
 
-        if normal_open_ok or scalp_open_ok:
-            side = impulse_side if scalp_open_ok else open_side
+        force_explore_open = False
+        if exploration_enabled and open_pos is None and len(open_map) < max_open_positions and cool_ok:
+            idle_s = now_epoch - float(_LAST_OPEN_TS or 0.0)
+            if idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf >= exploration_min_confidence:
+                if max(edge_yes, edge_no) >= exploration_edge_floor:
+                    force_explore_open = True
+
+        if normal_open_ok or scalp_open_ok or force_explore_open:
+            side = ("BUY_YES" if edge_yes >= edge_no else "BUY_NO") if force_explore_open else (impulse_side if scalp_open_ok else open_side)
             ask_open = ask_yes if side == "BUY_YES" else ask_no
             bid_open = float(r.get("best_bid_yes") or 0.0) if side == "BUY_YES" else float(r.get("best_bid_no") or 0.0)
             ex_cfg = cfg.get("execution", {})
@@ -1790,10 +1804,15 @@ def run_once(cfg: dict):
             size_mul = max(0.5, min(1.0, 0.5 + (conf / 100.0) * 0.6))
             if scalp_open_ok:
                 size_mul = min(size_mul, 0.65)
+            if force_explore_open:
+                size_mul = min(size_mul, max(0.15, exploration_size_mult))
             cash_now = float(state.cash_usd)
             per_trade_cash_cap = max(1.0, cash_now * max_trade_cash_fraction)
             size_usd = min(trade_cap * size_mul, per_trade_cash_cap, cash_now)
-            model_tag = (f"SCALP:{impulse.get('source','src')}:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
+            if force_explore_open:
+                model_tag = f"EXPLORE:{side}:idle"
+            else:
+                model_tag = (f"SCALP:{impulse.get('source','src')}:{side}:{round(impulse_bps,1)}bps" if scalp_open_ok else best_model)
             entry_price_ok = (entry >= min_entry_price) and (entry <= max_entry_price)
             if (entry > 0) and (not entry_price_ok):
                 append_event(cfg["storage"]["events_path"], {
@@ -1851,6 +1870,7 @@ def run_once(cfg: dict):
                 pos.edge_entry = float(edge_yes if side == "BUY_YES" else edge_no)
                 pos.edge_peak = pos.edge_entry
                 open_map[mid] = pos
+                _LAST_OPEN_TS = datetime.now(timezone.utc).timestamp()
                 append_event(cfg["storage"]["events_path"], {
                     "type": "paper_trade",
                     "action": "OPEN",
