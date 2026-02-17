@@ -48,6 +48,7 @@ _WINNER_HIST = {}
 _MODEL_SIDE_HIST = {}
 _PRICE_SRC_HIST = {"binance": [], "coinbase": [], "kraken": [], "bybit": []}
 _PRICE_SRC_LAST = {"coinbase": 0.0, "kraken": 0.0, "bybit": 0.0}
+_BINANCE_OPEN_PRICE_CACHE = {}
 _FLIP_FAIL_STREAK = {}
 _MARKET_LOCK_UNTIL = {}
 _GLOBAL_OPEN_PAUSE_UNTIL = 0.0
@@ -249,6 +250,44 @@ def _price_near_ts(ts: float, max_delta_s: float = 120.0) -> Optional[float]:
     if best is None or best_dt > max_delta_s:
         return None
     return best
+
+
+def _binance_open_price_near_ts(ts: float, max_age_s: float = 7200.0) -> Optional[float]:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    key = int(ts // 60)
+    hit = _BINANCE_OPEN_PRICE_CACHE.get(key)
+    if hit and (now_ts - float(hit.get("cached_ts", 0.0))) <= 600.0:
+        px = float(hit.get("price") or 0.0)
+        return px if px > 0 else None
+
+    try:
+        ms = int(max(0.0, ts) * 1000)
+        start_ms = max(0, ms - 60000)
+        end_ms = ms + 60000
+        r = httpx.get(
+            "https://api.binance.com/api/v3/klines",
+            params={"symbol": "BTCUSDT", "interval": "1m", "startTime": start_ms, "endTime": end_ms, "limit": 3},
+            timeout=1.8,
+        )
+        if r.status_code != 200:
+            return None
+        rows = r.json() or []
+        best_px = None
+        best_dt = 1e18
+        for row in rows:
+            if not isinstance(row, list) or len(row) < 2:
+                continue
+            k_open_ms = int(row[0])
+            dt = abs((k_open_ms / 1000.0) - ts)
+            if dt < best_dt:
+                best_dt = dt
+                best_px = float(row[1])
+        if best_px is None or best_dt > max_age_s:
+            return None
+        _BINANCE_OPEN_PRICE_CACHE[key] = {"price": float(best_px), "cached_ts": now_ts}
+        return float(best_px)
+    except Exception:
+        return None
 
 
 def _fetch_alt_price(source: str) -> Optional[float]:
@@ -1149,12 +1188,17 @@ def run_once(cfg: dict):
         if target_px is None and mid in _BTC_TARGET_CACHE:
             target_px = _BTC_TARGET_CACHE[mid]
         if target_px is None and st_dt is not None and datetime.now(timezone.utc) >= st_dt:
-            inferred = _price_near_ts(st_dt.timestamp(), max_delta_s=1200.0)
+            st_ts = st_dt.timestamp()
+            inferred = _price_near_ts(st_ts, max_delta_s=1200.0)
             if inferred is not None:
                 target_px = inferred
-            elif current_px is not None:
-                # Fallback when upstream openPrice is unavailable: lock first seen live price after start.
-                target_px = float(current_px)
+            else:
+                inferred_binance = _binance_open_price_near_ts(st_ts, max_age_s=7200.0)
+                if inferred_binance is not None:
+                    target_px = inferred_binance
+                elif current_px is not None:
+                    # Fallback when upstream openPrice is unavailable: lock first seen live price after start.
+                    target_px = float(current_px)
         if target_px is not None:
             _BTC_TARGET_CACHE[mid] = float(target_px)
 
@@ -1478,6 +1522,7 @@ def run_once(cfg: dict):
     scalp_min_edge = float(strategy_cfg.get("scalp_min_edge", 0.03))
     hard_stop_pct = float(strategy_cfg.get("hard_stop_pct", -0.15))
     open_fallback_max_spread = float(strategy_cfg.get("open_fallback_max_spread", 0.018))
+    open_fallback_min_edge = float(strategy_cfg.get("open_fallback_min_edge", 0.03))
     min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
     max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
@@ -1652,22 +1697,25 @@ def run_once(cfg: dict):
                 if ask_open > 0 and limit_open >= ask_open:
                     entry = ask_open
                     open_exec = "open_limit_fill"
-                elif open_fallback_taker and ask_open > 0 and spread_open <= open_fallback_max_spread:
+                elif open_fallback_taker and ask_open > 0 and spread_open <= open_fallback_max_spread and side_edge >= open_fallback_min_edge:
                     entry = ask_open
                     open_exec = "open_limit_timeout_fallback"
                 else:
                     entry = 0.0
                     open_exec = "open_limit_pending_skip"
                     if open_fallback_taker and ask_open > 0:
+                        reason = "open_fallback_spread_too_wide" if spread_open > open_fallback_max_spread else "open_fallback_edge_too_low"
                         append_event(cfg["storage"]["events_path"], {
                             "type": "market_guardrail",
                             "market_id": mid,
-                            "reason": "open_fallback_spread_too_wide",
+                            "reason": reason,
                             "side": side,
                             "best_bid": round(float(bid_open), 4),
                             "best_ask": round(float(ask_open), 4),
                             "spread": round(float(spread_open), 4),
                             "max_spread": round(float(open_fallback_max_spread), 4),
+                            "side_edge": round(float(side_edge), 4),
+                            "min_side_edge": round(float(open_fallback_min_edge), 4),
                             "confidence": conf,
                             "consensus": consensus,
                             "model": str(best_model),

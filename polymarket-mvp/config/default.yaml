@@ -87,6 +87,7 @@ strategy:
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.025
   open_fallback_max_spread: 0.018
+  open_fallback_min_edge: 0.03
   min_entry_price: 0.04
   max_entry_price: 0.96
   hard_stop_pct: -0.15
