@@ -743,6 +743,32 @@ def _topic_bucket(question: str, slug: str) -> str:
     return "other"
 
 
+def _infer_btc_target_from_text(question: str) -> Optional[float]:
+    q = str(question or "")
+    if not q:
+        return None
+    # Common forms: "$96,500", "96500", "96.5k".
+    matches = re.findall(r"\$?\s*(\d{2,3}(?:,\d{3})+|\d{4,6}(?:\.\d+)?)\s*([kK])?", q)
+    if not matches:
+        return None
+    vals = []
+    for raw_s, k in matches:
+        raw = str(raw_s or "").replace(",", "")
+        if not raw:
+            continue
+        try:
+            v = float(raw)
+        except Exception:
+            continue
+        if k:
+            v *= 1000.0
+        if v >= 1000.0:
+            vals.append(v)
+    if not vals:
+        return None
+    return round(max(vals), 2)
+
+
 def run_once(cfg: dict):
     global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS
     _ensure_btc_live_feed(cfg["storage"]["events_path"])
@@ -1199,6 +1225,16 @@ def run_once(cfg: dict):
                 elif current_px is not None:
                     # Fallback when upstream openPrice is unavailable: lock first seen live price after start.
                     target_px = float(current_px)
+        if target_px is None:
+            # Last-resort parse from market text (e.g. "... above $96,500 ...").
+            qtxt = getattr(rr, "question", "") if rr else ""
+            target_px = _infer_btc_target_from_text(qtxt)
+            if target_px is not None:
+                append_event(cfg["storage"]["events_path"], {
+                    "type": "btc_target_inferred_from_text",
+                    "market_id": r.get("market_id"),
+                    "target": round(float(target_px), 2),
+                })
         if target_px is not None:
             _BTC_TARGET_CACHE[mid] = float(target_px)
 
