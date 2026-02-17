@@ -1582,7 +1582,9 @@ def run_once(cfg: dict):
     scalp_min_impulse_bps = float(strategy_cfg.get("scalp_min_impulse_bps", 9.0))
     scalp_buy_yes_min_impulse_bps = float(strategy_cfg.get("scalp_buy_yes_min_impulse_bps", scalp_min_impulse_bps))
     scalp_buy_no_min_impulse_bps = float(strategy_cfg.get("scalp_buy_no_min_impulse_bps", scalp_min_impulse_bps))
-    scalp_min_edge = float(strategy_cfg.get("scalp_min_edge", 0.03))
+    scalp_min_edge = float(strategy_cfg.get("scalp_min_edge", 0.02))
+    normal_min_edge = float(strategy_cfg.get("normal_min_edge", 0.025))
+    reversal_min_edge = float(strategy_cfg.get("reversal_min_edge", 0.04))
     hard_stop_pct = float(strategy_cfg.get("hard_stop_pct", -0.15))
     open_fallback_max_spread = float(strategy_cfg.get("open_fallback_max_spread", 0.018))
     open_fallback_min_edge = float(strategy_cfg.get("open_fallback_min_edge", 0.03))
@@ -1696,12 +1698,12 @@ def run_once(cfg: dict):
         global_pause_ok = now_epoch >= float(_GLOBAL_OPEN_PAUSE_UNTIL or 0.0)
         cool_ok = (now_epoch - last_close_ts) > reentry_cooldown_s and lock_ok and global_pause_ok
         open_side = winner_side
-        required_edge = 0.04 if winner_side == "BUY_YES" else 0.04
+        required_edge = normal_min_edge
         if p_hit > 0.65 and winner_stability >= 0.7:
             required_edge *= 0.85
         if reversal_belief:
             open_side = "BUY_NO" if winner_side == "BUY_YES" else "BUY_YES"
-            required_edge = 0.06
+            required_edge = reversal_min_edge
 
         eh = _EDGE_HIST.get(mid, [])
         last = eh[-5:]
