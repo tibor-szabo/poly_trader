@@ -79,7 +79,7 @@ strategy:
   buy_yes_conf_floor: 64
   buy_yes_consensus_floor: 1
   buy_yes_reentry_cooldown_mult: 1.9
-  buy_no_conf_floor: 62
+  buy_no_conf_floor: 66
   buy_no_consensus_floor: 1
   buy_no_reentry_cooldown_mult: 1.65
   scalp_min_impulse_bps: 9.0
@@ -87,13 +87,13 @@ strategy:
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.016
-  open_fallback_min_edge: 0.022
-  open_fallback_min_confidence: 72
+  open_fallback_min_edge: 0.024
+  open_fallback_min_confidence: 75
   min_entry_price: 0.04
   max_entry_price: 0.96
   normal_min_edge: 0.02
   reversal_min_edge: 0.035
-  hard_stop_pct: -0.12
+  hard_stop_pct: -0.09
   tf_divergence_min: 0.12
   tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.22

@@ -773,8 +773,8 @@ def _infer_btc_target_from_text(question: str) -> Optional[float]:
     q = str(question or "")
     if not q:
         return None
-    # Common forms: "$96,500", "96500", "96.5k".
-    matches = re.findall(r"\$?\s*(\d{2,3}(?:,\d{3})+|\d{4,6}(?:\.\d+)?)\s*([kK])?", q)
+    # Common forms: "$96,500", "$96,500.5", "96500", "96.5k", "96.5 K".
+    matches = re.findall(r"\$?\s*(\d{2,3}(?:,\d{3})+(?:\.\d+)?|\d{4,6}(?:\.\d+)?)\s*([kK])?", q)
     if not matches:
         return None
     vals = []
