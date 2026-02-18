@@ -39,7 +39,7 @@ scoring:
 
 execution:
   max_exec_sum: 1.02
-  open_mode: "limit_first" # limit_first|market
+  open_mode: "market" # limit_first|market
   open_limit_improve_ticks: 1
   open_limit_fallback_taker: true
   close_mode: "limit_first" # limit_first|market
@@ -76,14 +76,14 @@ strategy:
   global_flip_stop_pause_seconds: 180
   global_flip_stop_window_seconds: 1200
   global_flip_stop_trigger_count: 1
-  buy_yes_conf_floor: 64
-  buy_yes_consensus_floor: 1
+  buy_yes_conf_floor: 68
+  buy_yes_consensus_floor: 2
   buy_yes_reentry_cooldown_mult: 1.9
   buy_no_conf_floor: 69
   buy_no_consensus_floor: 2
   buy_no_reentry_cooldown_mult: 2.1
   scalp_min_impulse_bps: 9.0
-  scalp_buy_yes_min_impulse_bps: 13.0
+  scalp_buy_yes_min_impulse_bps: 15.0
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.016
@@ -93,7 +93,7 @@ strategy:
   max_entry_price: 0.96
   normal_min_edge: 0.02
   reversal_min_edge: 0.035
-  hard_stop_pct: -0.075
+  hard_stop_pct: -0.06
   tf_divergence_min: 0.12
   tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.22

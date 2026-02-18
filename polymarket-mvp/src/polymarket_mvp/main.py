@@ -1255,13 +1255,31 @@ def run_once(cfg: dict):
                     target_px = float(current_px)
         if target_px is None:
             # Last-resort parse from market text (e.g. "... above $96,500 ...").
-            qtxt = getattr(rr, "question", "") if rr else ""
-            target_px = _infer_btc_target_from_text(qtxt)
+            text_chunks = []
+            if rr:
+                text_chunks.extend([
+                    getattr(rr, "question", ""),
+                    getattr(rr, "description", ""),
+                    getattr(rr, "subtitle", ""),
+                ])
+            text_chunks.extend([
+                str(r.get("market_name") or ""),
+                str(r.get("slug") or ""),
+            ])
+            parse_text = " | ".join([str(t or "") for t in text_chunks if str(t or "").strip()])
+            target_px = _infer_btc_target_from_text(parse_text)
             if target_px is not None:
                 append_event(cfg["storage"]["events_path"], {
                     "type": "btc_target_inferred_from_text",
                     "market_id": r.get("market_id"),
                     "target": round(float(target_px), 2),
+                    "text_sources": [
+                        "question",
+                        "description",
+                        "subtitle",
+                        "market_name",
+                        "slug",
+                    ],
                 })
         if target_px is not None:
             _BTC_TARGET_CACHE[mid] = float(target_px)
