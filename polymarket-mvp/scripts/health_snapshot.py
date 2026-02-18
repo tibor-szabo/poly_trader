@@ -77,6 +77,9 @@ def main() -> None:
 
     cands = (stats.get("latestScan") or {}).get("top_candidates", [])
     print(f"top_candidates: {len(cands)}")
+    positive_exec = [c for c in cands if isinstance(c.get("exec_edge_bps"), (int, float)) and c.get("exec_edge_bps") > 0]
+    positive_theo = [c for c in cands if isinstance(c.get("theo_edge_bps"), (int, float)) and c.get("theo_edge_bps") > 0]
+    print(f"positive_edges: exec={len(positive_exec)} theo={len(positive_theo)}")
     for c in cands[:5]:
         print(
             f"CAND {c.get('market_id')} {c.get('side')}"
