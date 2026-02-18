@@ -87,13 +87,15 @@ strategy:
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.016
-  open_fallback_min_edge: 0.03
-  open_fallback_min_confidence: 78
+  open_fallback_min_edge: 0.035
+  open_fallback_min_confidence: 80
+  open_fallback_min_time_left_s: 120
+  btc_target_missing_cooldown_s: 900
   min_entry_price: 0.04
   max_entry_price: 0.96
   normal_min_edge: 0.02
   reversal_min_edge: 0.035
-  hard_stop_pct: -0.06
+  hard_stop_pct: -0.055
   tf_divergence_min: 0.12
   tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.22

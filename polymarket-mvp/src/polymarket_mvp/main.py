@@ -1290,7 +1290,8 @@ def run_once(cfg: dict):
             now_ts = datetime.now(timezone.utc).timestamp()
             prev_ts = float(_BTC_TARGET_MISS_LAST.get(mid) or 0.0)
             # Throttle noisy repeats while keeping visibility for real missing-target episodes.
-            if now_ts - prev_ts >= 300.0:
+            btc_missing_cd_s = float(cfg.get("strategy", {}).get("btc_target_missing_cooldown_s", 900.0))
+            if now_ts - prev_ts >= max(60.0, btc_missing_cd_s):
                 append_event(cfg["storage"]["events_path"], {
                     "type": "btc_target_missing",
                     "market_id": r.get("market_id"),
@@ -1614,6 +1615,10 @@ def run_once(cfg: dict):
     open_fallback_max_spread = float(strategy_cfg.get("open_fallback_max_spread", 0.018))
     open_fallback_min_edge = float(strategy_cfg.get("open_fallback_min_edge", 0.03))
     open_fallback_min_confidence = int(strategy_cfg.get("open_fallback_min_confidence", 70))
+    open_fallback_min_time_left_s = float(
+        strategy_cfg.get("open_fallback_min_time_left_s", max(min_time_left_for_entry_s, 120.0))
+    )
+    # btc_target_missing cooldown is read where events are emitted to keep behavior local.
     min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
     max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
     open_map = {p.market_id: p for p in state.positions if p.status == "open"}
@@ -1795,14 +1800,16 @@ def run_once(cfg: dict):
                 if ask_open > 0 and limit_open >= ask_open:
                     entry = ask_open
                     open_exec = "open_limit_fill"
-                elif open_fallback_taker and ask_open > 0 and spread_open <= open_fallback_max_spread and side_edge >= open_fallback_min_edge and conf >= open_fallback_min_confidence:
+                elif open_fallback_taker and ask_open > 0 and t_left_open_s >= open_fallback_min_time_left_s and spread_open <= open_fallback_max_spread and side_edge >= open_fallback_min_edge and conf >= open_fallback_min_confidence:
                     entry = ask_open
                     open_exec = "open_limit_timeout_fallback"
                 else:
                     entry = 0.0
                     open_exec = "open_limit_pending_skip"
                     if open_fallback_taker and ask_open > 0:
-                        if spread_open > open_fallback_max_spread:
+                        if t_left_open_s < open_fallback_min_time_left_s:
+                            reason = "open_fallback_time_left_too_low"
+                        elif spread_open > open_fallback_max_spread:
                             reason = "open_fallback_spread_too_wide"
                         elif side_edge < open_fallback_min_edge:
                             reason = "open_fallback_edge_too_low"
@@ -1819,6 +1826,8 @@ def run_once(cfg: dict):
                             "max_spread": round(float(open_fallback_max_spread), 4),
                             "side_edge": round(float(side_edge), 4),
                             "min_side_edge": round(float(open_fallback_min_edge), 4),
+                            "time_left_s": round(float(t_left_open_s), 2),
+                            "min_time_left_s": round(float(open_fallback_min_time_left_s), 2),
                             "confidence": conf,
                             "min_confidence": int(open_fallback_min_confidence),
                             "consensus": consensus,
