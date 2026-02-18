@@ -27,6 +27,7 @@ _ALT_REFS_CACHE = []
 _ALT_REFS_TS = 0.0
 _BTC_TARGET_CACHE = {}
 _BTC_TARGET_MISS_LAST = {}
+_BTC_TARGET_MISS_KEYS = set()
 _BTC_PRICE_CACHE = {}
 _BTC_CURRENT_CACHE = {"ts": 0.0, "price": None}
 _BTC_PRICE_CACHE_TTL_OK = 120.0
@@ -1289,9 +1290,11 @@ def run_once(cfg: dict):
         if target_px is None:
             now_ts = datetime.now(timezone.utc).timestamp()
             prev_ts = float(_BTC_TARGET_MISS_LAST.get(mid) or 0.0)
+            miss_key = f"{mid}|{st or ''}|{ed or ''}"
             # Throttle noisy repeats while keeping visibility for real missing-target episodes.
+            # Also suppress duplicate emissions for the same market window during one process lifetime.
             btc_missing_cd_s = float(cfg.get("strategy", {}).get("btc_target_missing_cooldown_s", 900.0))
-            if now_ts - prev_ts >= max(60.0, btc_missing_cd_s):
+            if miss_key not in _BTC_TARGET_MISS_KEYS and (now_ts - prev_ts >= max(60.0, btc_missing_cd_s)):
                 append_event(cfg["storage"]["events_path"], {
                     "type": "btc_target_missing",
                     "market_id": r.get("market_id"),
@@ -1299,6 +1302,7 @@ def run_once(cfg: dict):
                     "end_date": ed,
                 })
                 _BTC_TARGET_MISS_LAST[mid] = now_ts
+                _BTC_TARGET_MISS_KEYS.add(miss_key)
         r["btc_current"] = round(current_px, 2) if current_px is not None else None
         r["btc_current_binance"] = round(binance_live, 2) if binance_live is not None else None
         r["btc_target_start"] = st
