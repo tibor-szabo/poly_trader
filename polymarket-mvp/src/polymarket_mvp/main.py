@@ -54,6 +54,7 @@ _FLIP_FAIL_STREAK = {}
 _MARKET_LOCK_UNTIL = {}
 _GLOBAL_OPEN_PAUSE_UNTIL = 0.0
 _RECENT_FLIP_STOP_LOSS_TS = []
+_RECENT_HARD_STOP_LOSS_TS = []
 _PENDING_CLOSES = {}
 _LIVE_EXECUTOR = None
 _LAST_TA_SIG = {}
@@ -797,7 +798,7 @@ def _infer_btc_target_from_text(question: str) -> Optional[float]:
 
 
 def run_once(cfg: dict):
-    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS, _LAST_OPEN_TS
+    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS, _RECENT_HARD_STOP_LOSS_TS, _LAST_OPEN_TS
     _ensure_btc_live_feed(cfg["storage"]["events_path"])
 
     clob = ClobAdapter(cfg["data"]["clob_rest_base"])
@@ -1622,6 +1623,11 @@ def run_once(cfg: dict):
     open_fallback_min_time_left_s = float(
         strategy_cfg.get("open_fallback_min_time_left_s", max(min_time_left_for_entry_s, 120.0))
     )
+    open_fallback_size_mult = float(strategy_cfg.get("open_fallback_size_mult", 0.75))
+    buy_no_size_mult = float(strategy_cfg.get("buy_no_size_mult", 0.85))
+    global_hard_stop_pause_seconds = int(strategy_cfg.get("global_hard_stop_pause_seconds", 0))
+    global_hard_stop_window_seconds = int(strategy_cfg.get("global_hard_stop_window_seconds", 1800))
+    global_hard_stop_trigger_count = int(strategy_cfg.get("global_hard_stop_trigger_count", 2))
     # btc_target_missing cooldown is read where events are emitted to keep behavior local.
     min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
     max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
@@ -1844,6 +1850,10 @@ def run_once(cfg: dict):
                 size_mul = min(size_mul, 0.65)
             if force_explore_open:
                 size_mul = min(size_mul, max(0.15, exploration_size_mult))
+            if open_exec == "open_limit_timeout_fallback":
+                size_mul *= max(0.10, min(1.0, open_fallback_size_mult))
+            if side == "BUY_NO":
+                size_mul *= max(0.10, min(1.0, buy_no_size_mult))
             cash_now = float(state.cash_usd)
             per_trade_cash_cap = max(1.0, cash_now * max_trade_cash_fraction)
             size_usd = min(trade_cap * size_mul, per_trade_cash_cap, cash_now)
@@ -2127,6 +2137,28 @@ def run_once(cfg: dict):
                             "last_close_reason": close_reason,
                             "last_pnl_usd": round(float(pnl), 4),
                         })
+
+                        now_ts = datetime.now(timezone.utc).timestamp()
+                        if global_hard_stop_pause_seconds > 0 and global_hard_stop_trigger_count > 0:
+                            _RECENT_HARD_STOP_LOSS_TS = [
+                                t for t in _RECENT_HARD_STOP_LOSS_TS
+                                if (now_ts - float(t)) <= max(60, global_hard_stop_window_seconds)
+                            ]
+                            _RECENT_HARD_STOP_LOSS_TS.append(now_ts)
+                            if len(_RECENT_HARD_STOP_LOSS_TS) >= global_hard_stop_trigger_count:
+                                _GLOBAL_OPEN_PAUSE_UNTIL = max(
+                                    float(_GLOBAL_OPEN_PAUSE_UNTIL or 0.0),
+                                    now_ts + float(global_hard_stop_pause_seconds),
+                                )
+                                append_event(cfg["storage"]["events_path"], {
+                                    "type": "market_guardrail",
+                                    "market_id": "*",
+                                    "reason": "global_hard_stop_cooloff",
+                                    "lock_seconds": int(global_hard_stop_pause_seconds),
+                                    "lock_until_ts": _GLOBAL_OPEN_PAUSE_UNTIL,
+                                    "recent_hard_stop_losses": len(_RECENT_HARD_STOP_LOSS_TS),
+                                    "window_seconds": int(global_hard_stop_window_seconds),
+                                })
 
                     # Flip-stop loss usually means noisy direction change; cool off this market briefly.
                     if close_reason == "flip_stop" and pnl <= 0 and flip_stop_loss_lock_seconds > 0:

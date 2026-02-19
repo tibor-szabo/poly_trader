@@ -90,6 +90,11 @@ strategy:
   open_fallback_min_edge: 0.05
   open_fallback_min_confidence: 84
   open_fallback_min_time_left_s: 120
+  open_fallback_size_mult: 0.72
+  buy_no_size_mult: 0.82
+  global_hard_stop_pause_seconds: 240
+  global_hard_stop_window_seconds: 1200
+  global_hard_stop_trigger_count: 2
   btc_target_missing_cooldown_s: 1800
   min_entry_price: 0.04
   max_entry_price: 0.96
