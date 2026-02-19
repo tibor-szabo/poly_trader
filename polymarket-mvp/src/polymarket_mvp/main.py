@@ -28,6 +28,7 @@ _ALT_REFS_TS = 0.0
 _BTC_TARGET_CACHE = {}
 _BTC_TARGET_MISS_LAST = {}
 _BTC_TARGET_MISS_KEYS = set()
+_BTC_TARGET_MISS_RECENT = {"loaded_ts": 0.0, "map": {}}
 _BTC_PRICE_CACHE = {}
 _BTC_CURRENT_CACHE = {"ts": 0.0, "price": None}
 _BTC_PRICE_CACHE_TTL_OK = 120.0
@@ -69,6 +70,55 @@ def _round_price(px: float, tick: float) -> float:
     if tick <= 0:
         return float(px)
     return round(round(float(px) / tick) * tick, 6)
+
+
+def _refresh_recent_btc_missing(events_path: str, refresh_s: float = 300.0, recent_lines: int = 120000, lookback_s: float = 6 * 3600.0) -> dict:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    st = _BTC_TARGET_MISS_RECENT
+    if (now_ts - float(st.get("loaded_ts") or 0.0)) < max(30.0, refresh_s):
+        return st.get("map") or {}
+
+    recent = {}
+    try:
+        from collections import deque
+        from pathlib import Path
+        import json
+
+        p = Path(events_path)
+        if p.exists():
+            lines = deque(maxlen=max(1000, int(recent_lines)))
+            with p.open("r") as f:
+                for ln in f:
+                    lines.append(ln)
+
+            for ln in reversed(lines):
+                try:
+                    e = json.loads(ln)
+                except Exception:
+                    continue
+                if e.get("type") != "btc_target_missing":
+                    continue
+                tsv = e.get("ts")
+                if not isinstance(tsv, str):
+                    continue
+                try:
+                    ets = datetime.fromisoformat(tsv.replace("Z", "+00:00")).timestamp()
+                except Exception:
+                    continue
+                if (now_ts - ets) > max(300.0, lookback_s):
+                    break
+                mid = str(e.get("market_id") or "")
+                start = str(e.get("event_start_time") or "")
+                end = str(e.get("end_date") or "")
+                k = f"{mid}|{start}|{end}"
+                if k and k not in recent:
+                    recent[k] = ets
+    except Exception:
+        recent = st.get("map") or {}
+
+    _BTC_TARGET_MISS_RECENT["loaded_ts"] = now_ts
+    _BTC_TARGET_MISS_RECENT["map"] = recent
+    return recent
 
 
 def _build_close_order(side: str, row: dict, cfg: dict) -> dict:
@@ -1295,7 +1345,18 @@ def run_once(cfg: dict):
             # Throttle noisy repeats while keeping visibility for real missing-target episodes.
             # Also suppress duplicate emissions for the same market window during one process lifetime.
             btc_missing_cd_s = float(cfg.get("strategy", {}).get("btc_target_missing_cooldown_s", 900.0))
-            if miss_key not in _BTC_TARGET_MISS_KEYS and (now_ts - prev_ts >= max(60.0, btc_missing_cd_s)):
+            recent_miss = _refresh_recent_btc_missing(
+                cfg["storage"]["events_path"],
+                refresh_s=float(cfg.get("strategy", {}).get("btc_target_missing_refresh_s", 300.0)),
+                recent_lines=int(cfg.get("strategy", {}).get("btc_target_missing_recent_lines", 120000)),
+                lookback_s=max(3600.0, btc_missing_cd_s * 2.0),
+            )
+            last_seen_ts = float(recent_miss.get(miss_key) or 0.0)
+            if (
+                miss_key not in _BTC_TARGET_MISS_KEYS
+                and (now_ts - prev_ts >= max(60.0, btc_missing_cd_s))
+                and (now_ts - last_seen_ts >= max(60.0, btc_missing_cd_s))
+            ):
                 append_event(cfg["storage"]["events_path"], {
                     "type": "btc_target_missing",
                     "market_id": r.get("market_id"),
@@ -1304,6 +1365,7 @@ def run_once(cfg: dict):
                 })
                 _BTC_TARGET_MISS_LAST[mid] = now_ts
                 _BTC_TARGET_MISS_KEYS.add(miss_key)
+                recent_miss[miss_key] = now_ts
         r["btc_current"] = round(current_px, 2) if current_px is not None else None
         r["btc_current_binance"] = round(binance_live, 2) if binance_live is not None else None
         r["btc_target_start"] = st

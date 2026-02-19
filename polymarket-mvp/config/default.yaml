@@ -76,7 +76,7 @@ strategy:
   global_flip_stop_pause_seconds: 180
   global_flip_stop_window_seconds: 1200
   global_flip_stop_trigger_count: 1
-  buy_yes_conf_floor: 68
+  buy_yes_conf_floor: 72
   buy_yes_consensus_floor: 2
   buy_yes_reentry_cooldown_mult: 1.9
   buy_no_conf_floor: 71
@@ -87,15 +87,17 @@ strategy:
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.016
-  open_fallback_min_edge: 0.05
-  open_fallback_min_confidence: 84
+  open_fallback_min_edge: 0.06
+  open_fallback_min_confidence: 88
   open_fallback_min_time_left_s: 120
-  open_fallback_size_mult: 0.72
+  open_fallback_size_mult: 0.60
   buy_no_size_mult: 0.82
-  global_hard_stop_pause_seconds: 240
+  global_hard_stop_pause_seconds: 420
   global_hard_stop_window_seconds: 1200
-  global_hard_stop_trigger_count: 2
-  btc_target_missing_cooldown_s: 1800
+  global_hard_stop_trigger_count: 1
+  btc_target_missing_cooldown_s: 3600
+  btc_target_missing_refresh_s: 300
+  btc_target_missing_recent_lines: 120000
   min_entry_price: 0.04
   max_entry_price: 0.96
   normal_min_edge: 0.02
