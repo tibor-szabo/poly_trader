@@ -821,6 +821,14 @@ def _topic_bucket(question: str, slug: str) -> str:
     return "other"
 
 
+def _btc_target_expected_from_text(question: str) -> bool:
+    q = str(question or "")
+    if not q:
+        return False
+    # Heuristic: BTC target markets usually include an explicit threshold value.
+    return bool(re.search(r"\$\s*\d|\b\d{4,6}(?:\.\d+)?\b|\b\d{2,3}(?:\.\d+)?\s*[kK]\b", q))
+
+
 def _infer_btc_target_from_text(question: str) -> Optional[float]:
     q = str(question or "")
     if not q:
@@ -1338,7 +1346,9 @@ def run_once(cfg: dict):
 
         r["btc_price_source"] = src or "https://data.chain.link/streams/btc-usd"
         r["btc_target"] = round(target_px, 2) if target_px is not None else None
-        if target_px is None:
+        target_expected = _btc_target_expected_from_text(parse_text)
+        r["btc_target_expected"] = bool(target_expected)
+        if target_px is None and target_expected:
             now_ts = datetime.now(timezone.utc).timestamp()
             prev_ts = float(_BTC_TARGET_MISS_LAST.get(mid) or 0.0)
             miss_key = f"{mid}|{st or ''}|{ed or ''}"
@@ -1914,6 +1924,10 @@ def run_once(cfg: dict):
                 size_mul = min(size_mul, max(0.15, exploration_size_mult))
             if open_exec == "open_limit_timeout_fallback":
                 size_mul *= max(0.10, min(1.0, open_fallback_size_mult))
+                # De-risk taker fallback fills as spread approaches configured ceiling.
+                if open_fallback_max_spread > 0:
+                    spread_ratio = max(0.0, min(1.0, spread_open / open_fallback_max_spread))
+                    size_mul *= (1.0 - (0.5 * spread_ratio))
             if side == "BUY_NO":
                 size_mul *= max(0.10, min(1.0, buy_no_size_mult))
             cash_now = float(state.cash_usd)

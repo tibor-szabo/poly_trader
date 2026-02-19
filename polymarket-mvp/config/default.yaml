@@ -87,11 +87,11 @@ strategy:
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.012
-  open_fallback_min_edge: 0.075
-  open_fallback_min_confidence: 91
+  open_fallback_min_edge: 0.085
+  open_fallback_min_confidence: 93
   open_fallback_min_time_left_s: 150
-  open_fallback_size_mult: 0.45
-  buy_no_size_mult: 0.70
+  open_fallback_size_mult: 0.40
+  buy_no_size_mult: 0.60
   global_hard_stop_pause_seconds: 720
   global_hard_stop_window_seconds: 1800
   global_hard_stop_trigger_count: 1
