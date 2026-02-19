@@ -90,7 +90,9 @@ def main() -> None:
             f" sig={c.get('signal')}"
         )
 
-    print(f"last_error: {stats.get('lastError')}")
+    state = payload.get("state") or {}
+    last_error = state.get("last_error") or stats.get("lastError")
+    print(f"last_error: {last_error}")
 
 
 if __name__ == "__main__":
