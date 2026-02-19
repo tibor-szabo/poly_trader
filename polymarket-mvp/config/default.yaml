@@ -9,8 +9,8 @@ data:
   gamma_base: "https://gamma-api.polymarket.com"
   use_clob_ws: true
   stale_seconds: 30
-  max_markets: 30
-  btc_group_size: 4
+  max_markets: 24
+  btc_group_size: 3
   alt_group_size: 0
   alt_group_refresh_seconds: 300
   alt_group_horizon_days: 30
@@ -79,7 +79,7 @@ strategy:
   buy_yes_conf_floor: 72
   buy_yes_consensus_floor: 2
   buy_yes_reentry_cooldown_mult: 1.9
-  buy_no_conf_floor: 71
+  buy_no_conf_floor: 74
   buy_no_consensus_floor: 2
   buy_no_reentry_cooldown_mult: 2.1
   scalp_min_impulse_bps: 9.0
@@ -91,13 +91,13 @@ strategy:
   open_fallback_min_confidence: 88
   open_fallback_min_time_left_s: 120
   open_fallback_size_mult: 0.60
-  buy_no_size_mult: 0.82
+  buy_no_size_mult: 0.70
   global_hard_stop_pause_seconds: 420
   global_hard_stop_window_seconds: 1200
   global_hard_stop_trigger_count: 1
   btc_target_missing_cooldown_s: 3600
-  btc_target_missing_refresh_s: 300
-  btc_target_missing_recent_lines: 120000
+  btc_target_missing_refresh_s: 180
+  btc_target_missing_recent_lines: 200000
   min_entry_price: 0.04
   max_entry_price: 0.96
   normal_min_edge: 0.02
