@@ -86,14 +86,14 @@ strategy:
   scalp_buy_yes_min_impulse_bps: 15.0
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
-  open_fallback_max_spread: 0.016
-  open_fallback_min_edge: 0.06
-  open_fallback_min_confidence: 88
-  open_fallback_min_time_left_s: 120
-  open_fallback_size_mult: 0.60
+  open_fallback_max_spread: 0.012
+  open_fallback_min_edge: 0.075
+  open_fallback_min_confidence: 91
+  open_fallback_min_time_left_s: 150
+  open_fallback_size_mult: 0.45
   buy_no_size_mult: 0.70
-  global_hard_stop_pause_seconds: 420
-  global_hard_stop_window_seconds: 1200
+  global_hard_stop_pause_seconds: 720
+  global_hard_stop_window_seconds: 1800
   global_hard_stop_trigger_count: 1
   btc_target_missing_cooldown_s: 3600
   btc_target_missing_refresh_s: 180
@@ -102,7 +102,7 @@ strategy:
   max_entry_price: 0.96
   normal_min_edge: 0.02
   reversal_min_edge: 0.035
-  hard_stop_pct: -0.045
+  hard_stop_pct: -0.038
   tf_divergence_min: 0.12
   tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.22
