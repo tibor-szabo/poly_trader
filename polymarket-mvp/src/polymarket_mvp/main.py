@@ -825,8 +825,19 @@ def _btc_target_expected_from_text(question: str) -> bool:
     q = str(question or "")
     if not q:
         return False
-    # Heuristic: BTC target markets usually include an explicit threshold value.
-    return bool(re.search(r"\$\s*\d|\b\d{4,6}(?:\.\d+)?\b|\b\d{2,3}(?:\.\d+)?\s*[kK]\b", q))
+
+    ql = q.lower()
+    if ("btc" not in ql) and ("bitcoin" not in ql):
+        return False
+
+    # Only flag markets that explicitly look like BTC threshold questions.
+    # This avoids false positives from plain timestamps/dates in text.
+    patterns = [
+        r"\$\s*\d{2,3}(?:,\d{3})+(?:\.\d+)?",                       # $96,500 / $96,500.5
+        r"\b\d{2,3}(?:\.\d+)?\s*[kK]\b",                            # 96.5k / 97k
+        r"\b(?:above|over|under|below|at|hits?|reach(?:es)?)\s*\$?\s*\d{4,6}(?:\.\d+)?\b",  # above 96500
+    ]
+    return any(re.search(p, q, flags=re.IGNORECASE) for p in patterns)
 
 
 def _infer_btc_target_from_text(question: str) -> Optional[float]:
