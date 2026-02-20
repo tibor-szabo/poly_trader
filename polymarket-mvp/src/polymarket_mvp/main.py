@@ -29,6 +29,8 @@ _BTC_TARGET_CACHE = {}
 _BTC_TARGET_MISS_LAST = {}
 _BTC_TARGET_MISS_KEYS = set()
 _BTC_TARGET_MISS_RECENT = {"loaded_ts": 0.0, "map": {}}
+_RECENT_BTC_TARGET_MISS_TS = []
+_LAST_BTC_TARGET_MISS_BURST_PAUSE_TS = 0.0
 _BTC_PRICE_CACHE = {}
 _BTC_CURRENT_CACHE = {"ts": 0.0, "price": None}
 _BTC_PRICE_CACHE_TTL_OK = 120.0
@@ -867,7 +869,7 @@ def _infer_btc_target_from_text(question: str) -> Optional[float]:
 
 
 def run_once(cfg: dict):
-    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS, _RECENT_HARD_STOP_LOSS_TS, _LAST_OPEN_TS
+    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS, _RECENT_HARD_STOP_LOSS_TS, _LAST_OPEN_TS, _RECENT_BTC_TARGET_MISS_TS, _LAST_BTC_TARGET_MISS_BURST_PAUSE_TS
     _ensure_btc_live_feed(cfg["storage"]["events_path"])
 
     clob = ClobAdapter(cfg["data"]["clob_rest_base"])
@@ -1388,6 +1390,29 @@ def run_once(cfg: dict):
                 _BTC_TARGET_MISS_LAST[mid] = now_ts
                 _BTC_TARGET_MISS_KEYS.add(miss_key)
                 recent_miss[miss_key] = now_ts
+
+                # If missing-target events spike, pause new opens briefly.
+                burst_window_s = float(strategy_cfg.get("btc_target_missing_burst_window_s", 900.0))
+                burst_trigger_count = int(strategy_cfg.get("btc_target_missing_burst_trigger_count", 12))
+                burst_pause_s = float(strategy_cfg.get("btc_target_missing_burst_pause_s", 300.0))
+                _RECENT_BTC_TARGET_MISS_TS = [
+                    ts for ts in _RECENT_BTC_TARGET_MISS_TS
+                    if (now_ts - float(ts)) <= max(60.0, burst_window_s)
+                ]
+                _RECENT_BTC_TARGET_MISS_TS.append(now_ts)
+                if len(_RECENT_BTC_TARGET_MISS_TS) >= max(1, burst_trigger_count):
+                    _GLOBAL_OPEN_PAUSE_UNTIL = max(float(_GLOBAL_OPEN_PAUSE_UNTIL or 0.0), now_ts + max(30.0, burst_pause_s))
+                    if (now_ts - float(_LAST_BTC_TARGET_MISS_BURST_PAUSE_TS or 0.0)) >= 60.0:
+                        append_event(cfg["storage"]["events_path"], {
+                            "type": "market_guardrail",
+                            "market_id": r.get("market_id"),
+                            "reason": "btc_target_missing_burst_pause",
+                            "missing_count": len(_RECENT_BTC_TARGET_MISS_TS),
+                            "window_s": round(float(burst_window_s), 1),
+                            "pause_s": round(float(max(30.0, burst_pause_s)), 1),
+                            "lock_until_ts": _GLOBAL_OPEN_PAUSE_UNTIL,
+                        })
+                        _LAST_BTC_TARGET_MISS_BURST_PAUSE_TS = now_ts
         r["btc_current"] = round(current_px, 2) if current_px is not None else None
         r["btc_current_binance"] = round(binance_live, 2) if binance_live is not None else None
         r["btc_target_start"] = st
