@@ -1712,6 +1712,7 @@ def run_once(cfg: dict):
     global_hard_stop_pause_seconds = int(strategy_cfg.get("global_hard_stop_pause_seconds", 0))
     global_hard_stop_window_seconds = int(strategy_cfg.get("global_hard_stop_window_seconds", 1800))
     global_hard_stop_trigger_count = int(strategy_cfg.get("global_hard_stop_trigger_count", 2))
+    hard_stop_market_lock_seconds = int(strategy_cfg.get("hard_stop_market_lock_seconds", 720))
     # btc_target_missing cooldown is read where events are emitted to keep behavior local.
     min_entry_price = float(strategy_cfg.get("min_entry_price", 0.04))
     max_entry_price = float(strategy_cfg.get("max_entry_price", 0.96))
@@ -2225,7 +2226,7 @@ def run_once(cfg: dict):
 
                     # Hard-stop losses are costly; pause this market longer before trying again.
                     if close_reason == "hard_stop_25" and pnl <= 0:
-                        lock_s = 720
+                        lock_s = max(180, hard_stop_market_lock_seconds)
                         _MARKET_LOCK_UNTIL[mid] = max(
                             float(_MARKET_LOCK_UNTIL.get(mid, 0.0) or 0.0),
                             datetime.now(timezone.utc).timestamp() + lock_s,

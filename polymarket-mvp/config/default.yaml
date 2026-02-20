@@ -87,12 +87,13 @@ strategy:
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.009
-  open_fallback_min_edge: 0.12
-  open_fallback_min_confidence: 97
+  open_fallback_min_edge: 0.14
+  open_fallback_min_confidence: 98
   open_fallback_min_time_left_s: 210
-  open_fallback_size_mult: 0.22
+  open_fallback_size_mult: 0.16
   buy_no_size_mult: 0.30
-  global_hard_stop_pause_seconds: 720
+  hard_stop_market_lock_seconds: 1200
+  global_hard_stop_pause_seconds: 900
   global_hard_stop_window_seconds: 1800
   global_hard_stop_trigger_count: 1
   btc_target_missing_cooldown_s: 3600
