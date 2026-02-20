@@ -1324,6 +1324,7 @@ def run_once(cfg: dict):
                 elif current_px is not None:
                     # Fallback when upstream openPrice is unavailable: lock first seen live price after start.
                     target_px = float(current_px)
+        parse_text = ""
         if target_px is None:
             # Last-resort parse from market text (e.g. "... above $96,500 ...").
             text_chunks = []
@@ -1862,18 +1863,33 @@ def run_once(cfg: dict):
             or (open_side == "BUY_NO" and impulse_bps >= abs(normal_open_max_opposing_impulse_bps))
         )
 
-        normal_open_ok = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and t_left_open_s >= min_time_left_for_entry_s and (not late_contrarian_block) and (not low_stability_block) and (not low_model_side_stability_block) and (not impulse_against_open)
+        btc_target_missing_now = bool(r.get("btc_target_expected")) and (r.get("btc_target") is None)
+        normal_open_candidate = open_pos is None and conf >= conf_floor and consensus >= consensus_floor and side_edge >= required_edge and persist >= 3 and len(open_map) < max_open_positions and cool_ok and t_left_open_s >= min_time_left_for_entry_s and (not late_contrarian_block) and (not low_stability_block) and (not low_model_side_stability_block) and (not impulse_against_open)
+        normal_open_ok = normal_open_candidate and (not btc_target_missing_now)
 
         impulse_edge = edge_yes if impulse_side == "BUY_YES" else edge_no
         scalp_impulse_req = scalp_buy_yes_min_impulse_bps if impulse_side == "BUY_YES" else scalp_buy_no_min_impulse_bps
-        scalp_open_ok = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_open_s >= max(75.0, min_time_left_for_entry_s)
+        scalp_open_candidate = open_pos is None and impulse_side in {"BUY_YES", "BUY_NO"} and abs(impulse_bps) >= scalp_impulse_req and impulse_edge >= scalp_min_edge and len(open_map) < max_open_positions and cool_ok and t_left_open_s >= max(75.0, min_time_left_for_entry_s)
+        scalp_open_ok = scalp_open_candidate and (not btc_target_missing_now)
 
-        force_explore_open = False
+        force_explore_candidate = False
         if exploration_enabled and open_pos is None and len(open_map) < max_open_positions and cool_ok:
             idle_s = now_epoch - float(_LAST_OPEN_TS or 0.0)
             if idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf >= exploration_min_confidence:
                 if max(edge_yes, edge_no) >= exploration_edge_floor:
-                    force_explore_open = True
+                    force_explore_candidate = True
+        force_explore_open = force_explore_candidate and (not btc_target_missing_now)
+
+        if btc_target_missing_now and (normal_open_candidate or scalp_open_candidate or force_explore_candidate):
+            append_event(cfg["storage"]["events_path"], {
+                "type": "market_guardrail",
+                "market_id": mid,
+                "reason": "btc_target_missing_block_open",
+                "side": open_side,
+                "confidence": conf,
+                "consensus": consensus,
+                "model": str(best_model),
+            })
 
         if normal_open_ok or scalp_open_ok or force_explore_open:
             side = ("BUY_YES" if edge_yes >= edge_no else "BUY_NO") if force_explore_open else (impulse_side if scalp_open_ok else open_side)

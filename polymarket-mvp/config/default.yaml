@@ -79,19 +79,19 @@ strategy:
   buy_yes_conf_floor: 72
   buy_yes_consensus_floor: 2
   buy_yes_reentry_cooldown_mult: 1.9
-  buy_no_conf_floor: 78
-  buy_no_consensus_floor: 3
-  buy_no_reentry_cooldown_mult: 2.3
+  buy_no_conf_floor: 81
+  buy_no_consensus_floor: 4
+  buy_no_reentry_cooldown_mult: 2.6
   scalp_min_impulse_bps: 9.0
   scalp_buy_yes_min_impulse_bps: 15.0
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.012
-  open_fallback_min_edge: 0.085
-  open_fallback_min_confidence: 93
-  open_fallback_min_time_left_s: 150
-  open_fallback_size_mult: 0.35
-  buy_no_size_mult: 0.45
+  open_fallback_min_edge: 0.10
+  open_fallback_min_confidence: 95
+  open_fallback_min_time_left_s: 180
+  open_fallback_size_mult: 0.30
+  buy_no_size_mult: 0.35
   global_hard_stop_pause_seconds: 720
   global_hard_stop_window_seconds: 1800
   global_hard_stop_trigger_count: 1
