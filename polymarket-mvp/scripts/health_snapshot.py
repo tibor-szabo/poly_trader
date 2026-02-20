@@ -90,6 +90,22 @@ def main() -> None:
             f" sig={c.get('signal')}"
         )
 
+    btc_cands = [
+        c for c in cands
+        if "bitcoin up or down" in str(c.get("market_name", "")).lower()
+    ]
+    print(f"btc_top_candidates: {len(btc_cands)}")
+    for c in btc_cands[:3]:
+        print(
+            f"BTC_CAND {c.get('market_id')} {c.get('side')}"
+            f" exec_sum={c.get('yes_no_exec_sum')}"
+            f" hint_sum={c.get('yes_no_hint_sum')}"
+            f" exec_edge={c.get('exec_edge_bps')}"
+            f" theo_edge={c.get('theo_edge_bps')}"
+            f" sig={c.get('signal')}"
+            f" | {c.get('market_name')}"
+        )
+
     state = payload.get("state") or {}
     last_error = state.get("last_error") or stats.get("lastError")
     print(f"last_error: {last_error}")
