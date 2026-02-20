@@ -40,7 +40,7 @@ scoring:
 execution:
   max_exec_sum: 1.02
   open_mode: "market" # limit_first|market
-  open_limit_improve_ticks: 1
+  open_limit_improve_ticks: 2
   open_limit_fallback_taker: true
   close_mode: "limit_first" # limit_first|market
   close_limit_improve_ticks: 1
@@ -76,8 +76,8 @@ strategy:
   global_flip_stop_pause_seconds: 180
   global_flip_stop_window_seconds: 1200
   global_flip_stop_trigger_count: 1
-  buy_yes_conf_floor: 72
-  buy_yes_consensus_floor: 2
+  buy_yes_conf_floor: 74
+  buy_yes_consensus_floor: 3
   buy_yes_reentry_cooldown_mult: 1.9
   buy_no_conf_floor: 84
   buy_no_consensus_floor: 4
@@ -96,13 +96,13 @@ strategy:
   global_hard_stop_window_seconds: 1800
   global_hard_stop_trigger_count: 1
   btc_target_missing_cooldown_s: 3600
-  btc_target_missing_refresh_s: 90
-  btc_target_missing_recent_lines: 220000
+  btc_target_missing_refresh_s: 60
+  btc_target_missing_recent_lines: 300000
   min_entry_price: 0.04
   max_entry_price: 0.96
   normal_min_edge: 0.02
   reversal_min_edge: 0.035
-  hard_stop_pct: -0.034
+  hard_stop_pct: -0.03
   tf_divergence_min: 0.12
   tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.22
