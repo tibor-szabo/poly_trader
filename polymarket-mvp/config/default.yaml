@@ -76,9 +76,9 @@ strategy:
   global_flip_stop_pause_seconds: 180
   global_flip_stop_window_seconds: 1200
   global_flip_stop_trigger_count: 1
-  buy_yes_conf_floor: 74
-  buy_yes_consensus_floor: 3
-  buy_yes_reentry_cooldown_mult: 1.9
+  buy_yes_conf_floor: 78
+  buy_yes_consensus_floor: 4
+  buy_yes_reentry_cooldown_mult: 2.2
   buy_no_conf_floor: 90
   buy_no_consensus_floor: 5
   buy_no_reentry_cooldown_mult: 2.6
@@ -100,13 +100,13 @@ strategy:
   btc_target_missing_refresh_s: 60
   btc_target_missing_recent_lines: 300000
   btc_target_missing_burst_window_s: 900
-  btc_target_missing_burst_trigger_count: 12
-  btc_target_missing_burst_pause_s: 300
+  btc_target_missing_burst_trigger_count: 8
+  btc_target_missing_burst_pause_s: 900
   min_entry_price: 0.04
   max_entry_price: 0.96
   normal_min_edge: 0.02
   reversal_min_edge: 0.035
-  hard_stop_pct: -0.022
+  hard_stop_pct: -0.018
   tf_divergence_min: 0.12
   tf_divergence_fee_buffer: 0.02
   normal_open_min_winner_stability: 0.22
