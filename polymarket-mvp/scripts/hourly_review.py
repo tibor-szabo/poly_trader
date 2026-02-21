@@ -102,11 +102,14 @@ def main():
     close_reasons = Counter((e.get("reason") or "-") for e in closes)
     open_execution = Counter((e.get("open_execution") or "-") for e in opens)
     close_execution = Counter((e.get("close_execution") or "-") for e in closes)
+    guardrail_reasons = Counter((e.get("reason") or "-") for e in guards)
     open_fallback_count = int(open_execution.get("open_limit_timeout_fallback", 0))
 
     side_pnl = defaultdict(float)
     model_pnl = defaultdict(float)
     reason_pnl = defaultdict(float)
+    hard_stop_by_model = defaultdict(int)
+    hard_stop_pnl_by_model = defaultdict(float)
     model_wins = defaultdict(int)
     model_trades = defaultdict(int)
     for e in closes:
@@ -118,6 +121,9 @@ def main():
         model_pnl[model] += v
         reason_pnl[reason] += v
         model_trades[model] += 1
+        if reason == "hard_stop_25":
+            hard_stop_by_model[model] += 1
+            hard_stop_pnl_by_model[model] += v
         if v > 0:
             model_wins[model] += 1
 
@@ -191,6 +197,8 @@ def main():
         "close_execution": dict(close_execution),
         "close_reasons": dict(close_reasons),
         "close_reasons_pnl": {k: round(v, 4) for k, v in reason_pnl.items()},
+        "hard_stop_by_model": dict(hard_stop_by_model),
+        "hard_stop_pnl_by_model": {k: round(v, 4) for k, v in hard_stop_pnl_by_model.items()},
         "churn": {
             "reentries_10m": reentries,
             "fast_reentries_3m": fast_reentries,
@@ -206,6 +214,7 @@ def main():
             ],
         },
         "guardrails_triggered": len(guards),
+        "guardrail_reasons": dict(guardrail_reasons),
         "opportunity_seen": {
             "scanner": opportunity_seen_count,
             "ws": ws_opportunity_seen_count,
