@@ -76,7 +76,7 @@ strategy:
   global_flip_stop_pause_seconds: 180
   global_flip_stop_window_seconds: 1200
   global_flip_stop_trigger_count: 1
-  buy_yes_conf_floor: 78
+  buy_yes_conf_floor: 82
   buy_yes_consensus_floor: 4
   buy_yes_reentry_cooldown_mult: 2.2
   buy_no_conf_floor: 90
@@ -117,10 +117,10 @@ strategy:
   normal_open_max_opposing_impulse_bps: 1.2
   exploration_enabled: true
   exploration_idle_seconds: 1800
-  exploration_min_confidence: 60
+  exploration_min_confidence: 66
   exploration_min_time_left_s: 150
   exploration_edge_floor: 0.018
-  exploration_size_mult: 0.20
+  exploration_size_mult: 0.14
   exploration_hard_stop_window_seconds: 1800
   exploration_hard_stop_trigger_count: 2
   exploration_hard_stop_pause_seconds: 3600
