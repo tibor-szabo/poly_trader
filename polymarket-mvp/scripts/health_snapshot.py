@@ -79,7 +79,16 @@ def main() -> None:
     print(f"top_candidates: {len(cands)}")
     positive_exec = [c for c in cands if isinstance(c.get("exec_edge_bps"), (int, float)) and c.get("exec_edge_bps") > 0]
     positive_theo = [c for c in cands if isinstance(c.get("theo_edge_bps"), (int, float)) and c.get("theo_edge_bps") > 0]
+    edge_conflicts = [
+        c
+        for c in cands
+        if isinstance(c.get("exec_edge_bps"), (int, float))
+        and isinstance(c.get("theo_edge_bps"), (int, float))
+        and c.get("exec_edge_bps") > 0
+        and c.get("theo_edge_bps") <= 0
+    ]
     print(f"positive_edges: exec={len(positive_exec)} theo={len(positive_theo)}")
+    print(f"edge_conflicts_exec_pos_theo_nonpos: {len(edge_conflicts)}")
     for c in cands[:5]:
         print(
             f"CAND {c.get('market_id')} {c.get('side')}"
@@ -88,6 +97,15 @@ def main() -> None:
             f" exec_edge={c.get('exec_edge_bps')}"
             f" theo_edge={c.get('theo_edge_bps')}"
             f" sig={c.get('signal')}"
+        )
+
+    for c in edge_conflicts[:3]:
+        print(
+            f"EDGE_CONFLICT {c.get('market_id')} {c.get('side')}"
+            f" exec_edge={c.get('exec_edge_bps')}"
+            f" theo_edge={c.get('theo_edge_bps')}"
+            f" sig={c.get('signal')}"
+            f" | {c.get('market_name')}"
         )
 
     btc_cands = [
