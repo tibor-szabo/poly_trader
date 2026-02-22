@@ -93,7 +93,7 @@ strategy:
   open_fallback_size_mult: 0.08
   buy_no_size_mult: 0.16
   hard_stop_market_lock_seconds: 1200
-  global_hard_stop_pause_seconds: 900
+  global_hard_stop_pause_seconds: 1800
   global_hard_stop_window_seconds: 1800
   global_hard_stop_trigger_count: 1
   btc_target_missing_cooldown_s: 3600
@@ -117,10 +117,13 @@ strategy:
   normal_open_max_opposing_impulse_bps: 1.2
   exploration_enabled: true
   exploration_idle_seconds: 1800
-  exploration_min_confidence: 53
-  exploration_min_time_left_s: 120
-  exploration_edge_floor: 0.012
-  exploration_size_mult: 0.30
+  exploration_min_confidence: 60
+  exploration_min_time_left_s: 150
+  exploration_edge_floor: 0.018
+  exploration_size_mult: 0.20
+  exploration_hard_stop_window_seconds: 1800
+  exploration_hard_stop_trigger_count: 2
+  exploration_hard_stop_pause_seconds: 3600
 
 storage:
   state_path: "data/state.json"

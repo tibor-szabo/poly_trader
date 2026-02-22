@@ -58,6 +58,7 @@ _MARKET_LOCK_UNTIL = {}
 _GLOBAL_OPEN_PAUSE_UNTIL = 0.0
 _RECENT_FLIP_STOP_LOSS_TS = []
 _RECENT_HARD_STOP_LOSS_TS = []
+_RECENT_EXPLORE_HARD_STOP_LOSS_TS = []
 _PENDING_CLOSES = {}
 _LIVE_EXECUTOR = None
 _LAST_TA_SIG = {}
@@ -869,7 +870,7 @@ def _infer_btc_target_from_text(question: str) -> Optional[float]:
 
 
 def run_once(cfg: dict):
-    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS, _RECENT_HARD_STOP_LOSS_TS, _LAST_OPEN_TS, _RECENT_BTC_TARGET_MISS_TS, _LAST_BTC_TARGET_MISS_BURST_PAUSE_TS
+    global _GLOBAL_OPEN_PAUSE_UNTIL, _RECENT_FLIP_STOP_LOSS_TS, _RECENT_HARD_STOP_LOSS_TS, _RECENT_EXPLORE_HARD_STOP_LOSS_TS, _LAST_OPEN_TS, _RECENT_BTC_TARGET_MISS_TS, _LAST_BTC_TARGET_MISS_BURST_PAUSE_TS
     _ensure_btc_live_feed(cfg["storage"]["events_path"])
 
     clob = ClobAdapter(cfg["data"]["clob_rest_base"])
@@ -1710,6 +1711,9 @@ def run_once(cfg: dict):
     exploration_min_time_left_s = float(strategy_cfg.get("exploration_min_time_left_s", 120.0))
     exploration_edge_floor = float(strategy_cfg.get("exploration_edge_floor", 0.012))
     exploration_size_mult = float(strategy_cfg.get("exploration_size_mult", 0.35))
+    exploration_hard_stop_window_seconds = int(strategy_cfg.get("exploration_hard_stop_window_seconds", 1800))
+    exploration_hard_stop_trigger_count = int(strategy_cfg.get("exploration_hard_stop_trigger_count", 2))
+    exploration_hard_stop_pause_seconds = int(strategy_cfg.get("exploration_hard_stop_pause_seconds", 3600))
     model_side_stability_window = int(strategy_cfg.get("model_side_stability_window", 8))
     model_side_stability_min = float(strategy_cfg.get("model_side_stability_min", 0.55))
     model_side_stability_buy_yes_min = float(strategy_cfg.get("model_side_stability_buy_yes_min", 0.70))
@@ -1899,7 +1903,15 @@ def run_once(cfg: dict):
         scalp_open_ok = scalp_open_candidate and (not btc_target_missing_now)
 
         force_explore_candidate = False
-        if exploration_enabled and open_pos is None and len(open_map) < max_open_positions and cool_ok:
+        explore_pause_ok = True
+        if exploration_hard_stop_pause_seconds > 0 and exploration_hard_stop_trigger_count > 0:
+            _RECENT_EXPLORE_HARD_STOP_LOSS_TS = [
+                t for t in _RECENT_EXPLORE_HARD_STOP_LOSS_TS
+                if (now_epoch - float(t)) <= max(60, exploration_hard_stop_window_seconds)
+            ]
+            if len(_RECENT_EXPLORE_HARD_STOP_LOSS_TS) >= exploration_hard_stop_trigger_count:
+                explore_pause_ok = False
+        if exploration_enabled and explore_pause_ok and open_pos is None and len(open_map) < max_open_positions and cool_ok:
             idle_s = now_epoch - float(_LAST_OPEN_TS or 0.0)
             if idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf >= exploration_min_confidence:
                 if max(edge_yes, edge_no) >= exploration_edge_floor:
@@ -1915,6 +1927,16 @@ def run_once(cfg: dict):
                 "confidence": conf,
                 "consensus": consensus,
                 "model": str(best_model),
+            })
+
+        if exploration_enabled and (not explore_pause_ok) and open_pos is None and len(open_map) < max_open_positions and cool_ok:
+            append_event(cfg["storage"]["events_path"], {
+                "type": "market_guardrail",
+                "market_id": mid,
+                "reason": "exploration_hard_stop_cooloff",
+                "recent_explore_hard_stop_losses": len(_RECENT_EXPLORE_HARD_STOP_LOSS_TS),
+                "trigger_count": int(exploration_hard_stop_trigger_count),
+                "window_seconds": int(exploration_hard_stop_window_seconds),
             })
 
         if normal_open_ok or scalp_open_ok or force_explore_open:
@@ -2268,6 +2290,27 @@ def run_once(cfg: dict):
                         })
 
                         now_ts = datetime.now(timezone.utc).timestamp()
+                        if str(open_pos.model or "").startswith("EXPLORE:"):
+                            _RECENT_EXPLORE_HARD_STOP_LOSS_TS = [
+                                t for t in _RECENT_EXPLORE_HARD_STOP_LOSS_TS
+                                if (now_ts - float(t)) <= max(60, exploration_hard_stop_window_seconds)
+                            ]
+                            _RECENT_EXPLORE_HARD_STOP_LOSS_TS.append(now_ts)
+                            if exploration_hard_stop_pause_seconds > 0 and len(_RECENT_EXPLORE_HARD_STOP_LOSS_TS) >= exploration_hard_stop_trigger_count:
+                                _GLOBAL_OPEN_PAUSE_UNTIL = max(
+                                    float(_GLOBAL_OPEN_PAUSE_UNTIL or 0.0),
+                                    now_ts + float(exploration_hard_stop_pause_seconds),
+                                )
+                                append_event(cfg["storage"]["events_path"], {
+                                    "type": "market_guardrail",
+                                    "market_id": "*",
+                                    "reason": "exploration_hard_stop_global_cooloff",
+                                    "lock_seconds": int(exploration_hard_stop_pause_seconds),
+                                    "lock_until_ts": _GLOBAL_OPEN_PAUSE_UNTIL,
+                                    "recent_explore_hard_stop_losses": len(_RECENT_EXPLORE_HARD_STOP_LOSS_TS),
+                                    "window_seconds": int(exploration_hard_stop_window_seconds),
+                                })
+
                         if global_hard_stop_pause_seconds > 0 and global_hard_stop_trigger_count > 0:
                             _RECENT_HARD_STOP_LOSS_TS = [
                                 t for t in _RECENT_HARD_STOP_LOSS_TS
