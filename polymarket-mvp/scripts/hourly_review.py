@@ -10,6 +10,10 @@ EVENTS = Path(__file__).resolve().parents[1] / "data" / "events.jsonl"
 WINDOW_S = 3600
 RECENT_LINES = 300_000
 
+LOW_CONVERSION_PCT = 8.0
+LOW_WS_OPP_SHARE_PCT = 10.0
+SHORT_HOLD_SECONDS = 45.0
+
 
 def to_epoch(v):
     if isinstance(v, (int, float)):
@@ -167,15 +171,76 @@ def main():
     loss_hold = [h for e, h in hold_pairs if float(e.get("pnl_usd") or 0.0) < 0]
     win_hold = [h for e, h in hold_pairs if float(e.get("pnl_usd") or 0.0) > 0]
 
+    opportunity_total = opportunity_seen_count + ws_opportunity_seen_count
+    ws_opp_share_pct = (ws_opportunity_seen_count / max(1, opportunity_total)) * 100.0
+    conversion_pct = (len(opens) / max(1, opportunity_total)) * 100.0
+
     review_flags = []
+    issues = []
     if len(closes) < 5:
         review_flags.append("low_sample_size")
+        issues.append(
+            {
+                "name": "low_sample_size",
+                "severity": "high",
+                "evidence": {
+                    "closes": len(closes),
+                    "opens": len(opens),
+                    "window_hours": round(args.window_hours, 2),
+                },
+                "suggestion": "Increase candidate throughput or widen eligible universe until >=5 closes/4h before trusting PnL.",
+            }
+        )
     if len(opens) > 0 and (open_fallback_count / max(1, len(opens))) >= 0.5:
         review_flags.append("high_open_fallback_share")
     if (len(opens) + len(closes)) == 0 and (opportunity_seen_count + ws_opportunity_seen_count) > 0:
         review_flags.append("opportunities_without_trades")
     if btc_target_missing_count > 0:
         review_flags.append("btc_target_missing")
+
+    if opportunity_total >= 10 and conversion_pct < LOW_CONVERSION_PCT:
+        review_flags.append("low_opportunity_conversion")
+        issues.append(
+            {
+                "name": "low_opportunity_conversion",
+                "severity": "medium",
+                "evidence": {
+                    "opportunities": opportunity_total,
+                    "opens": len(opens),
+                    "conversion_pct": round(conversion_pct, 2),
+                },
+                "suggestion": "Loosen only the most restrictive gate (single parameter per run) and track conversion delta next hour.",
+            }
+        )
+
+    if event_type_counts.get("ws_market_tick", 0) > 500 and ws_opp_share_pct < LOW_WS_OPP_SHARE_PCT:
+        review_flags.append("ws_opportunity_underrepresentation")
+        issues.append(
+            {
+                "name": "ws_opportunity_underrepresentation",
+                "severity": "medium",
+                "evidence": {
+                    "ws_market_tick": int(event_type_counts.get("ws_market_tick", 0)),
+                    "ws_opportunity_seen": ws_opportunity_seen_count,
+                    "ws_opportunity_share_pct": round(ws_opp_share_pct, 2),
+                },
+                "suggestion": "Audit ws opportunity gating/thresholds; if intentional, add explicit metric guardrail so drops are visible.",
+            }
+        )
+
+    if len(hold_s) > 0 and avg_hold <= SHORT_HOLD_SECONDS:
+        review_flags.append("very_short_average_hold")
+        issues.append(
+            {
+                "name": "very_short_average_hold",
+                "severity": "low",
+                "evidence": {
+                    "avg_hold_seconds": round(avg_hold, 2),
+                    "closes": len(closes),
+                },
+                "suggestion": "Review close reasons for premature exits; consider minimum-hold guard except for hard-stop exits.",
+            }
+        )
 
     out = {
         "window_minutes": round(window_s / 60.0, 2),
@@ -226,12 +291,11 @@ def main():
             {"market_id": mid, "count": cnt}
             for mid, cnt in btc_target_missing_markets.most_common(5)
         ],
-        "opportunity_to_trade_conversion_pct": round(
-            (len(opens) / max(1, opportunity_seen_count + ws_opportunity_seen_count)) * 100.0,
-            2,
-        ),
+        "opportunity_to_trade_conversion_pct": round(conversion_pct, 2),
+        "ws_opportunity_share_pct": round(ws_opp_share_pct, 2),
         "event_type_counts": dict(event_type_counts),
         "review_flags": review_flags,
+        "issues": issues,
     }
     print(json.dumps(out, indent=2, sort_keys=True))
 
