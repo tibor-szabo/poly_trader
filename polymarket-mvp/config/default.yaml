@@ -117,10 +117,10 @@ strategy:
   normal_open_max_opposing_impulse_bps: 1.2
   exploration_enabled: true
   exploration_idle_seconds: 1800
-  exploration_min_confidence: 55
+  exploration_min_confidence: 53
   exploration_min_time_left_s: 120
   exploration_edge_floor: 0.012
-  exploration_size_mult: 0.35
+  exploration_size_mult: 0.30
 
 storage:
   state_path: "data/state.json"
