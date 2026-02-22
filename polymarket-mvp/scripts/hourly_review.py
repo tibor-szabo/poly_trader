@@ -242,6 +242,30 @@ def main():
             }
         )
 
+    hard_stop_count = int(close_reasons.get("hard_stop_25", 0))
+    hard_stop_share_pct = (hard_stop_count / max(1, len(closes))) * 100.0
+    top_hard_stop_model = None
+    top_hard_stop_count = 0
+    if hard_stop_by_model:
+        top_hard_stop_model, top_hard_stop_count = max(hard_stop_by_model.items(), key=lambda kv: kv[1])
+    if len(closes) >= 5 and hard_stop_count >= 3 and hard_stop_share_pct >= 50.0 and reason_pnl.get("hard_stop_25", 0.0) < 0:
+        review_flags.append("hard_stop_dominance")
+        issues.append(
+            {
+                "name": "hard_stop_dominance",
+                "severity": "high",
+                "evidence": {
+                    "hard_stop_closes": hard_stop_count,
+                    "total_closes": len(closes),
+                    "hard_stop_share_pct": round(hard_stop_share_pct, 2),
+                    "hard_stop_pnl_usd": round(reason_pnl.get("hard_stop_25", 0.0), 4),
+                    "top_hard_stop_model": top_hard_stop_model,
+                    "top_hard_stop_model_count": int(top_hard_stop_count),
+                },
+                "suggestion": "Reduce risk on the dominant hard-stop model first (smaller size or tighter entry confidence), then re-check next hour.",
+            }
+        )
+
     out = {
         "window_minutes": round(window_s / 60.0, 2),
         "counts": {"opens": len(opens), "closes": len(closes), "partial_closes": len(partial_closes)},
@@ -262,6 +286,7 @@ def main():
         "close_execution": dict(close_execution),
         "close_reasons": dict(close_reasons),
         "close_reasons_pnl": {k: round(v, 4) for k, v in reason_pnl.items()},
+        "hard_stop_share_pct": round(hard_stop_share_pct, 2),
         "hard_stop_by_model": dict(hard_stop_by_model),
         "hard_stop_pnl_by_model": {k: round(v, 4) for k, v in hard_stop_pnl_by_model.items()},
         "churn": {
