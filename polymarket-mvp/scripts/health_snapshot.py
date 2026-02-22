@@ -56,12 +56,23 @@ def main() -> None:
 
     btc = (stats.get("latestGroups") or {}).get("bitcoin", [])
     print(f"btc_focus_count: {len(btc)}")
-    for m in btc[:3]:
+    sig_counts: dict[str, int] = {}
+    for m in btc:
+        sig = str(m.get("signal") or "UNKNOWN")
+        sig_counts[sig] = sig_counts.get(sig, 0) + 1
+    if sig_counts:
+        print("btc_focus_signals: " + ", ".join(f"{k}={v}" for k, v in sorted(sig_counts.items())))
+
+    for m in btc[:4]:
         print(
             f"BTC {m.get('market_id')}"
             f" sum={m.get('ask_sum_no_fees')}"
             f" spread={m.get('spread_sum')}"
             f" sig={m.get('signal')}"
+            f" model={m.get('best_model')}"
+            f" side={m.get('model_side')}"
+            f" edge_no={m.get('edge_no')}"
+            f" t_left_s={m.get('t_left_s')}"
             f" | {m.get('market_name')}"
         )
 
