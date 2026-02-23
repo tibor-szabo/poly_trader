@@ -244,6 +244,29 @@ def main():
 
     hard_stop_count = int(close_reasons.get("hard_stop_25", 0))
     hard_stop_share_pct = (hard_stop_count / max(1, len(closes))) * 100.0
+
+    buy_yes_closes = int(by_side.get("BUY_YES", 0))
+    buy_yes_loss_share_pct = 0.0
+    if buy_yes_closes > 0:
+        buy_yes_losses = sum(1 for e in closes if (e.get("side") == "BUY_YES") and float(e.get("pnl_usd") or 0.0) < 0)
+        buy_yes_loss_share_pct = (buy_yes_losses / buy_yes_closes) * 100.0
+    buy_yes_pnl = float(side_pnl.get("BUY_YES", 0.0))
+    if len(closes) >= 8 and buy_yes_closes >= 3 and buy_yes_pnl < 0 and buy_yes_loss_share_pct >= 66.0:
+        review_flags.append("buy_yes_drawdown_concentration")
+        issues.append(
+            {
+                "name": "buy_yes_drawdown_concentration",
+                "severity": "high",
+                "evidence": {
+                    "buy_yes_closes": buy_yes_closes,
+                    "buy_yes_pnl_usd": round(buy_yes_pnl, 4),
+                    "buy_yes_loss_share_pct": round(buy_yes_loss_share_pct, 2),
+                    "total_closes": len(closes),
+                },
+                "suggestion": "De-risk BUY_YES entries first (smaller size and/or stricter impulse threshold) before changing broader gates.",
+            }
+        )
+
     top_hard_stop_model = None
     top_hard_stop_count = 0
     if hard_stop_by_model:

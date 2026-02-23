@@ -83,7 +83,7 @@ strategy:
   buy_no_consensus_floor: 5
   buy_no_reentry_cooldown_mult: 2.6
   scalp_min_impulse_bps: 9.0
-  scalp_buy_yes_min_impulse_bps: 15.0
+  scalp_buy_yes_min_impulse_bps: 18.0
   scalp_buy_no_min_impulse_bps: 12.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.006
@@ -91,6 +91,7 @@ strategy:
   open_fallback_min_confidence: 98
   open_fallback_min_time_left_s: 240
   open_fallback_size_mult: 0.08
+  buy_yes_size_mult: 0.16
   buy_no_size_mult: 0.16
   hard_stop_market_lock_seconds: 1200
   global_hard_stop_pause_seconds: 1800

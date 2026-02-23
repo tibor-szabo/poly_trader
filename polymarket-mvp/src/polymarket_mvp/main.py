@@ -1737,6 +1737,7 @@ def run_once(cfg: dict):
         strategy_cfg.get("open_fallback_min_time_left_s", max(min_time_left_for_entry_s, 120.0))
     )
     open_fallback_size_mult = float(strategy_cfg.get("open_fallback_size_mult", 0.75))
+    buy_yes_size_mult = float(strategy_cfg.get("buy_yes_size_mult", 1.0))
     buy_no_size_mult = float(strategy_cfg.get("buy_no_size_mult", 0.85))
     global_hard_stop_pause_seconds = int(strategy_cfg.get("global_hard_stop_pause_seconds", 0))
     global_hard_stop_window_seconds = int(strategy_cfg.get("global_hard_stop_window_seconds", 1800))
@@ -2003,7 +2004,9 @@ def run_once(cfg: dict):
                 if open_fallback_max_spread > 0:
                     spread_ratio = max(0.0, min(1.0, spread_open / open_fallback_max_spread))
                     size_mul *= (1.0 - (0.5 * spread_ratio))
-            if side == "BUY_NO":
+            if side == "BUY_YES":
+                size_mul *= max(0.10, min(1.0, buy_yes_size_mult))
+            elif side == "BUY_NO":
                 size_mul *= max(0.10, min(1.0, buy_no_size_mult))
             cash_now = float(state.cash_usd)
             per_trade_cash_cap = max(1.0, cash_now * max_trade_cash_fraction)
