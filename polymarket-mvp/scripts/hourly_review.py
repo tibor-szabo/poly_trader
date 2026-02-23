@@ -271,6 +271,24 @@ def main():
     top_hard_stop_count = 0
     if hard_stop_by_model:
         top_hard_stop_model, top_hard_stop_count = max(hard_stop_by_model.items(), key=lambda kv: kv[1])
+    if len(closes) >= 3 and hard_stop_count == len(closes) and reason_pnl.get("hard_stop_25", 0.0) < 0:
+        review_flags.append("hard_stop_dominance_early")
+        issues.append(
+            {
+                "name": "hard_stop_dominance_early",
+                "severity": "medium",
+                "evidence": {
+                    "hard_stop_closes": hard_stop_count,
+                    "total_closes": len(closes),
+                    "hard_stop_share_pct": round(hard_stop_share_pct, 2),
+                    "hard_stop_pnl_usd": round(reason_pnl.get("hard_stop_25", 0.0), 4),
+                    "top_hard_stop_model": top_hard_stop_model,
+                    "top_hard_stop_model_count": int(top_hard_stop_count),
+                },
+                "suggestion": "Treat as early warning: tighten exploration entry quality and/or reduce exploration size until non-hard-stop exits appear.",
+            }
+        )
+
     if len(closes) >= 5 and hard_stop_count >= 3 and hard_stop_share_pct >= 50.0 and reason_pnl.get("hard_stop_25", 0.0) < 0:
         review_flags.append("hard_stop_dominance")
         issues.append(

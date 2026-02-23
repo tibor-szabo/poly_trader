@@ -118,10 +118,10 @@ strategy:
   normal_open_max_opposing_impulse_bps: 1.2
   exploration_enabled: true
   exploration_idle_seconds: 1800
-  exploration_min_confidence: 66
+  exploration_min_confidence: 70
   exploration_min_time_left_s: 150
-  exploration_edge_floor: 0.018
-  exploration_size_mult: 0.10
+  exploration_edge_floor: 0.020
+  exploration_size_mult: 0.08
   exploration_hard_stop_window_seconds: 1800
   exploration_hard_stop_trigger_count: 2
   exploration_hard_stop_pause_seconds: 3600
