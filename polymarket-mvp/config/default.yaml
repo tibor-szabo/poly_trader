@@ -91,7 +91,7 @@ strategy:
   open_fallback_min_confidence: 98
   open_fallback_min_time_left_s: 240
   open_fallback_size_mult: 0.08
-  buy_yes_size_mult: 0.16
+  buy_yes_size_mult: 0.12
   buy_no_size_mult: 0.16
   hard_stop_market_lock_seconds: 1200
   global_hard_stop_pause_seconds: 1800
@@ -118,10 +118,12 @@ strategy:
   normal_open_max_opposing_impulse_bps: 1.2
   exploration_enabled: true
   exploration_idle_seconds: 2700
-  exploration_min_confidence: 70
+  exploration_min_confidence: 74
   exploration_min_time_left_s: 150
   exploration_edge_floor: 0.020
-  exploration_size_mult: 0.08
+  exploration_buy_no_edge_floor: 0.028
+  exploration_size_mult: 0.06
+  exploration_buy_no_size_mult: 0.55
   exploration_hard_stop_window_seconds: 1800
   exploration_hard_stop_trigger_count: 2
   exploration_hard_stop_pause_seconds: 3600

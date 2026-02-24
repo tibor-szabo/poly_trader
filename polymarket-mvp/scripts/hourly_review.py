@@ -2,7 +2,7 @@
 import argparse
 import json
 import time
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -44,12 +44,35 @@ def iter_recent_lines(path: Path, recent_lines: int):
         with path.open() as f:
             yield from f
         return
-    q = deque(maxlen=recent_lines)
-    with path.open() as f:
-        for line in f:
-            q.append(line)
-    for line in q:
-        yield line
+
+    # Read only the tail of large jsonl files instead of scanning the full file.
+    # Keeps hourly review runtime predictable as events.jsonl grows.
+    block_size = 1024 * 1024
+    with path.open("rb") as f:
+        f.seek(0, 2)
+        file_size = f.tell()
+        if file_size <= 0:
+            return
+
+        pos = file_size
+        newline_count = 0
+        chunks = []
+
+        while pos > 0 and newline_count <= recent_lines:
+            read_size = min(block_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            chunk = f.read(read_size)
+            chunks.append(chunk)
+            newline_count += chunk.count(b"\n")
+
+        data = b"".join(reversed(chunks))
+        lines = data.splitlines()[-recent_lines:]
+        for raw in lines:
+            try:
+                yield raw.decode("utf-8")
+            except UnicodeDecodeError:
+                yield raw.decode("utf-8", errors="ignore")
 
 
 def main():
