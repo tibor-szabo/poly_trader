@@ -80,11 +80,11 @@ strategy:
   buy_yes_consensus_floor: 4
   buy_yes_reentry_cooldown_mult: 2.2
   buy_no_conf_floor: 90
-  buy_no_consensus_floor: 5
+  buy_no_consensus_floor: 4
   buy_no_reentry_cooldown_mult: 2.6
   scalp_min_impulse_bps: 9.0
   scalp_buy_yes_min_impulse_bps: 18.0
-  scalp_buy_no_min_impulse_bps: 12.0
+  scalp_buy_no_min_impulse_bps: 14.0
   scalp_min_edge: 0.018
   open_fallback_max_spread: 0.006
   open_fallback_min_edge: 0.20
@@ -117,7 +117,7 @@ strategy:
   model_side_stability_buy_yes_min: 0.65
   normal_open_max_opposing_impulse_bps: 1.2
   exploration_enabled: true
-  exploration_idle_seconds: 1800
+  exploration_idle_seconds: 2700
   exploration_min_confidence: 70
   exploration_min_time_left_s: 150
   exploration_edge_floor: 0.020
