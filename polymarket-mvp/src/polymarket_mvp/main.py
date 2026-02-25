@@ -1710,7 +1710,9 @@ def run_once(cfg: dict):
     exploration_min_confidence = int(strategy_cfg.get("exploration_min_confidence", 55))
     exploration_min_time_left_s = float(strategy_cfg.get("exploration_min_time_left_s", 120.0))
     exploration_edge_floor = float(strategy_cfg.get("exploration_edge_floor", 0.012))
+    exploration_buy_no_edge_floor = float(strategy_cfg.get("exploration_buy_no_edge_floor", exploration_edge_floor))
     exploration_size_mult = float(strategy_cfg.get("exploration_size_mult", 0.35))
+    exploration_buy_no_size_mult = float(strategy_cfg.get("exploration_buy_no_size_mult", 1.0))
     exploration_hard_stop_window_seconds = int(strategy_cfg.get("exploration_hard_stop_window_seconds", 1800))
     exploration_hard_stop_trigger_count = int(strategy_cfg.get("exploration_hard_stop_trigger_count", 2))
     exploration_hard_stop_pause_seconds = int(strategy_cfg.get("exploration_hard_stop_pause_seconds", 3600))
@@ -1739,6 +1741,8 @@ def run_once(cfg: dict):
     open_fallback_size_mult = float(strategy_cfg.get("open_fallback_size_mult", 0.75))
     buy_yes_size_mult = float(strategy_cfg.get("buy_yes_size_mult", 1.0))
     buy_no_size_mult = float(strategy_cfg.get("buy_no_size_mult", 0.85))
+    buy_no_hard_stop_size_cooldown_s = float(strategy_cfg.get("buy_no_hard_stop_size_cooldown_s", 2400.0))
+    buy_no_hard_stop_size_mult = float(strategy_cfg.get("buy_no_hard_stop_size_mult", 0.70))
     global_hard_stop_pause_seconds = int(strategy_cfg.get("global_hard_stop_pause_seconds", 0))
     global_hard_stop_window_seconds = int(strategy_cfg.get("global_hard_stop_window_seconds", 1800))
     global_hard_stop_trigger_count = int(strategy_cfg.get("global_hard_stop_trigger_count", 2))
@@ -1914,9 +1918,33 @@ def run_once(cfg: dict):
                 explore_pause_ok = False
         if exploration_enabled and explore_pause_ok and open_pos is None and len(open_map) < max_open_positions and cool_ok:
             idle_s = now_epoch - float(_LAST_OPEN_TS or 0.0)
-            if idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf >= exploration_min_confidence:
-                if max(edge_yes, edge_no) >= exploration_edge_floor:
+            explore_side = "BUY_YES" if edge_yes >= edge_no else "BUY_NO"
+            explore_conf_floor = max(
+                exploration_min_confidence,
+                buy_yes_conf_floor if explore_side == "BUY_YES" else buy_no_conf_floor,
+            )
+            explore_edge_floor = exploration_buy_no_edge_floor if explore_side == "BUY_NO" else exploration_edge_floor
+            if idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf >= explore_conf_floor:
+                if max(edge_yes, edge_no) >= explore_edge_floor:
                     force_explore_candidate = True
+                else:
+                    append_event(cfg["storage"]["events_path"], {
+                        "type": "market_guardrail",
+                        "market_id": mid,
+                        "reason": "exploration_edge_too_low",
+                        "side": explore_side,
+                        "side_edge": round(float(max(edge_yes, edge_no)), 4),
+                        "min_side_edge": round(float(explore_edge_floor), 4),
+                    })
+            elif idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf < explore_conf_floor:
+                append_event(cfg["storage"]["events_path"], {
+                    "type": "market_guardrail",
+                    "market_id": mid,
+                    "reason": "exploration_conf_too_low",
+                    "side": explore_side,
+                    "confidence": int(conf),
+                    "min_confidence": int(explore_conf_floor),
+                })
         force_explore_open = force_explore_candidate and (not btc_target_missing_now)
 
         if btc_target_missing_now and (normal_open_candidate or scalp_open_candidate or force_explore_candidate):
@@ -1998,6 +2026,8 @@ def run_once(cfg: dict):
                 size_mul = min(size_mul, 0.65)
             if force_explore_open:
                 size_mul = min(size_mul, max(0.15, exploration_size_mult))
+                if side == "BUY_NO":
+                    size_mul *= max(0.25, min(1.0, exploration_buy_no_size_mult))
             if open_exec == "open_limit_timeout_fallback":
                 size_mul *= max(0.10, min(1.0, open_fallback_size_mult))
                 # De-risk taker fallback fills as spread approaches configured ceiling.
@@ -2008,6 +2038,21 @@ def run_once(cfg: dict):
                 size_mul *= max(0.10, min(1.0, buy_yes_size_mult))
             elif side == "BUY_NO":
                 size_mul *= max(0.10, min(1.0, buy_no_size_mult))
+                if (
+                    last_close_reason == "hard_stop_25"
+                    and last_close_side == "BUY_NO"
+                    and last_close_pnl <= 0
+                    and (now_epoch - last_close_ts) < max(300.0, buy_no_hard_stop_size_cooldown_s)
+                ):
+                    size_mul *= max(0.20, min(1.0, buy_no_hard_stop_size_mult))
+                    append_event(cfg["storage"]["events_path"], {
+                        "type": "market_guardrail",
+                        "market_id": mid,
+                        "reason": "buy_no_hard_stop_size_cooldown",
+                        "size_mult": round(float(max(0.20, min(1.0, buy_no_hard_stop_size_mult))), 4),
+                        "cooldown_s": round(float(max(300.0, buy_no_hard_stop_size_cooldown_s)), 2),
+                        "seconds_since_last_close": round(float(now_epoch - last_close_ts), 2),
+                    })
             cash_now = float(state.cash_usd)
             per_trade_cash_cap = max(1.0, cash_now * max_trade_cash_fraction)
             size_usd = min(trade_cap * size_mul, per_trade_cash_cap, cash_now)

@@ -13,6 +13,8 @@ RECENT_LINES = 300_000
 LOW_CONVERSION_PCT = 8.0
 LOW_WS_OPP_SHARE_PCT = 10.0
 SHORT_HOLD_SECONDS = 45.0
+ADAPTER_ERRORS_PER_HOUR_WARN = 2.0
+SCAN_EMPTY_PER_HOUR_WARN = 2.0
 
 
 def to_epoch(v):
@@ -251,6 +253,40 @@ def main():
             }
         )
 
+    adapter_errors = int(event_type_counts.get("adapter_error", 0))
+    adapter_errors_per_hour = adapter_errors / max(1e-9, args.window_hours)
+    if adapter_errors_per_hour >= ADAPTER_ERRORS_PER_HOUR_WARN:
+        review_flags.append("adapter_error_spike")
+        issues.append(
+            {
+                "name": "adapter_error_spike",
+                "severity": "medium",
+                "evidence": {
+                    "adapter_errors": adapter_errors,
+                    "window_hours": round(args.window_hours, 2),
+                    "adapter_errors_per_hour": round(adapter_errors_per_hour, 2),
+                },
+                "suggestion": "Inspect adapter_error payloads and tighten retry/backoff or stale-feed fallback before loosening entry gates.",
+            }
+        )
+
+    market_scan_empty = int(event_type_counts.get("market_scan_empty", 0))
+    market_scan_empty_per_hour = market_scan_empty / max(1e-9, args.window_hours)
+    if market_scan_empty_per_hour >= SCAN_EMPTY_PER_HOUR_WARN:
+        review_flags.append("scan_empty_spike")
+        issues.append(
+            {
+                "name": "scan_empty_spike",
+                "severity": "medium",
+                "evidence": {
+                    "market_scan_empty": market_scan_empty,
+                    "window_hours": round(args.window_hours, 2),
+                    "market_scan_empty_per_hour": round(market_scan_empty_per_hour, 2),
+                },
+                "suggestion": "Check upstream market fetch health and universe filters; repeated empty scans can suppress valid opportunities.",
+            }
+        )
+
     if len(hold_s) > 0 and avg_hold <= SHORT_HOLD_SECONDS:
         review_flags.append("very_short_average_hold")
         issues.append(
@@ -383,6 +419,8 @@ def main():
         "opportunity_to_trade_conversion_pct": round(conversion_pct, 2),
         "ws_opportunity_share_pct": round(ws_opp_share_pct, 2),
         "event_type_counts": dict(event_type_counts),
+        "adapter_errors_per_hour": round(adapter_errors_per_hour, 2),
+        "market_scan_empty_per_hour": round(market_scan_empty_per_hour, 2),
         "review_flags": review_flags,
         "issues": issues,
     }
