@@ -121,9 +121,9 @@ strategy:
   exploration_min_confidence: 74
   exploration_min_time_left_s: 150
   exploration_edge_floor: 0.020
-  exploration_buy_no_edge_floor: 0.028
+  exploration_buy_no_edge_floor: 0.032
   exploration_size_mult: 0.06
-  exploration_buy_no_size_mult: 0.55
+  exploration_buy_no_size_mult: 0.45
   exploration_hard_stop_window_seconds: 1800
   exploration_hard_stop_trigger_count: 2
   exploration_hard_stop_pause_seconds: 3600
