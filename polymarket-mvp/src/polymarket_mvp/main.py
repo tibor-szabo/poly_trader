@@ -63,6 +63,7 @@ _PENDING_CLOSES = {}
 _LIVE_EXECUTOR = None
 _LAST_TA_SIG = {}
 _LAST_OPEN_TS = 0.0
+_LAST_EVENT_TS = {}
 
 
 def _pos_key(pos) -> str:
@@ -73,6 +74,16 @@ def _round_price(px: float, tick: float) -> float:
     if tick <= 0:
         return float(px)
     return round(round(float(px) / tick) * tick, 6)
+
+
+def _should_emit_periodic_event(event_key: str, now_ts: float, cooldown_s: float) -> bool:
+    if cooldown_s <= 0:
+        return True
+    last_ts = float(_LAST_EVENT_TS.get(event_key, 0.0) or 0.0)
+    if (now_ts - last_ts) < cooldown_s:
+        return False
+    _LAST_EVENT_TS[event_key] = now_ts
+    return True
 
 
 def _refresh_recent_btc_missing(events_path: str, refresh_s: float = 300.0, recent_lines: int = 120000, lookback_s: float = 6 * 3600.0) -> dict:
@@ -1038,15 +1049,21 @@ def run_once(cfg: dict):
                 **ws_hook.stats(),
             })
     except Exception as e:
-        append_event(cfg["storage"]["events_path"], {"type": "adapter_error", "source": "gamma_clob", "error": str(e)})
+        now_ts = datetime.now(timezone.utc).timestamp()
+        adapter_error_event_cooldown_s = float(cfg.get("data", {}).get("adapter_error_event_cooldown_s", 60.0))
+        if _should_emit_periodic_event("adapter_error:gamma_clob", now_ts, adapter_error_event_cooldown_s):
+            append_event(cfg["storage"]["events_path"], {"type": "adapter_error", "source": "gamma_clob", "error": str(e)})
 
     if not snapshots:
         if cfg["data"].get("focus_keywords"):
-            append_event(cfg["storage"]["events_path"], {
-                "type": "market_scan_empty",
-                "reason": "no_markets_for_focus_keywords",
-                "focus_keywords": cfg["data"].get("focus_keywords", []),
-            })
+            now_ts = datetime.now(timezone.utc).timestamp()
+            market_scan_empty_event_cooldown_s = float(cfg.get("data", {}).get("market_scan_empty_event_cooldown_s", 60.0))
+            if _should_emit_periodic_event("market_scan_empty:no_markets_for_focus_keywords", now_ts, market_scan_empty_event_cooldown_s):
+                append_event(cfg["storage"]["events_path"], {
+                    "type": "market_scan_empty",
+                    "reason": "no_markets_for_focus_keywords",
+                    "focus_keywords": cfg["data"].get("focus_keywords", []),
+                })
             print("[yellow]No focused live markets found; skipping cycle.[/yellow]")
             return
         snapshots = clob.fetch_snapshots()  # demo fallback only when no focus filter

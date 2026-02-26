@@ -20,6 +20,8 @@ data:
   alt_vol_weight: 0.60
   alt_max_spread_sum: 0.12
   btc_live_poll_ms: 300
+  adapter_error_event_cooldown_s: 60
+  market_scan_empty_event_cooldown_s: 60
   focus_keywords:
     - "BTC"
     - "Bitcoin"
@@ -120,11 +122,11 @@ strategy:
   normal_open_max_opposing_impulse_bps: 1.2
   exploration_enabled: true
   exploration_idle_seconds: 2700
-  exploration_min_confidence: 78
+  exploration_min_confidence: 80
   exploration_min_time_left_s: 150
   exploration_edge_floor: 0.020
   exploration_buy_no_edge_floor: 0.038
-  exploration_size_mult: 0.06
+  exploration_size_mult: 0.05
   exploration_buy_no_size_mult: 0.30
   exploration_hard_stop_window_seconds: 1800
   exploration_hard_stop_trigger_count: 2
