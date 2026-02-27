@@ -1730,6 +1730,12 @@ def run_once(cfg: dict):
     exploration_buy_no_edge_floor = float(strategy_cfg.get("exploration_buy_no_edge_floor", exploration_edge_floor))
     exploration_size_mult = float(strategy_cfg.get("exploration_size_mult", 0.35))
     exploration_buy_no_size_mult = float(strategy_cfg.get("exploration_buy_no_size_mult", 1.0))
+    exploration_buy_no_max_opposing_impulse_bps = float(
+        strategy_cfg.get("exploration_buy_no_max_opposing_impulse_bps", normal_open_max_opposing_impulse_bps)
+    )
+    exploration_model_side_stability_min = float(
+        strategy_cfg.get("exploration_model_side_stability_min", max(0.55, model_side_stability_min))
+    )
     exploration_hard_stop_window_seconds = int(strategy_cfg.get("exploration_hard_stop_window_seconds", 1800))
     exploration_hard_stop_trigger_count = int(strategy_cfg.get("exploration_hard_stop_trigger_count", 2))
     exploration_hard_stop_pause_seconds = int(strategy_cfg.get("exploration_hard_stop_pause_seconds", 3600))
@@ -1942,15 +1948,40 @@ def run_once(cfg: dict):
             )
             explore_edge_floor = exploration_buy_no_edge_floor if explore_side == "BUY_NO" else exploration_edge_floor
             if idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf >= explore_conf_floor:
-                if max(edge_yes, edge_no) >= explore_edge_floor:
+                explore_side_edge = max(edge_yes, edge_no)
+                explore_impulse_block = (
+                    explore_side == "BUY_NO" and impulse_bps >= abs(exploration_buy_no_max_opposing_impulse_bps)
+                )
+                explore_model_stability_block = (
+                    explore_side == "BUY_NO" and model_side_stability < exploration_model_side_stability_min
+                )
+                if explore_side_edge >= explore_edge_floor and (not explore_impulse_block) and (not explore_model_stability_block):
                     force_explore_candidate = True
+                elif explore_impulse_block:
+                    append_event(cfg["storage"]["events_path"], {
+                        "type": "market_guardrail",
+                        "market_id": mid,
+                        "reason": "exploration_buy_no_impulse_block",
+                        "side": explore_side,
+                        "impulse_bps_3s": round(float(impulse_bps), 3),
+                        "max_opposing_impulse_bps": round(float(abs(exploration_buy_no_max_opposing_impulse_bps)), 3),
+                    })
+                elif explore_model_stability_block:
+                    append_event(cfg["storage"]["events_path"], {
+                        "type": "market_guardrail",
+                        "market_id": mid,
+                        "reason": "exploration_buy_no_model_stability_low",
+                        "side": explore_side,
+                        "model_side_stability": round(float(model_side_stability), 3),
+                        "min_model_side_stability": round(float(exploration_model_side_stability_min), 3),
+                    })
                 else:
                     append_event(cfg["storage"]["events_path"], {
                         "type": "market_guardrail",
                         "market_id": mid,
                         "reason": "exploration_edge_too_low",
                         "side": explore_side,
-                        "side_edge": round(float(max(edge_yes, edge_no)), 4),
+                        "side_edge": round(float(explore_side_edge), 4),
                         "min_side_edge": round(float(explore_edge_floor), 4),
                     })
             elif idle_s >= exploration_idle_seconds and t_left_open_s >= exploration_min_time_left_s and conf < explore_conf_floor:
